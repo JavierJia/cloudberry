@@ -112,8 +112,10 @@ object ResponseTime extends App {
     //    keywordWithTime()
     //    selectivity(keywords)
     //      keywordWithContinueTime()
-    //    elasticTimeGap()
-    testOverheadOfMultipleQueries()
+    //        elasticTimeGap()
+    elasticAdaptiveGap()
+    //    testOverheadOfMultipleQueries()
+
 
     def selectivity(seq: Seq[Any]): Unit = {
       for (s <- seq) {
@@ -196,33 +198,75 @@ object ResponseTime extends App {
     }
 
     def elasticAdaptiveGap(): Unit = {
-      val repeat = 15
-      for (keyword <- keywords) {
-        var start = DateTime.now()
-        var gap = 2
-        val reportGap = 2000
-        var lastRequireTime = 2000
-        var (historyGap, historyTime) = (0, 1l)
-        1 to repeat foreach { i =>
-          val aql = getAQL(start.minusHours(gap), gap, keyword)
-          val (lastTime, avg, count) = multipleTime(0, aql)
+      val ExpectGap = 3000
+      1 to 3 foreach { n =>
+        val reportGap = ExpectGap / n
+        for (keyword <- keywords) {
+          var start = DateTime.now()
+          val end = start.minusDays(90)
+          var gap = 2
+          var lastExpectTime = ExpectGap
+          var (historyGap, historyTime) = (0, 1l)
+          val batchStart = DateTime.now()
+          var times = 0
+          var (checkPoint, numResults) = (DateTime.now().plusMillis(ExpectGap), 0)
+          while (start.minusHours(gap).getMillis >= end.getMillis) {
+            val aql = getAQL(start.minusHours(gap), gap, keyword)
+            val (lastTime, _, count) = multipleTime(0, aql)
 
+            val now = DateTime.now
+            var missed = now.getMillis - checkPoint.getMillis
+            if (missed < 200) {
+              numResults += 1
+            } else if (numResults < 1) {
+              println(s"${now.getMillis},${checkPoint.getMillis},$keyword,missed,$missed")
+            }
+            while (missed > 0) {
+              checkPoint = checkPoint.plusMillis(ExpectGap)
+              numResults = 0
+              missed = now.getMillis - checkPoint.getMillis
+              if (missed < 200) {
+                numResults += 1
+              } else if (numResults < 1) {
+                println(s"${now.getMillis},${checkPoint.getMillis},$keyword,missed,$missed")
+              }
+            }
 
-          println(s"$gap,$keyword,$lastTime,$lastRequireTime,$count")
+            println(s"${now.getMillis},${checkPoint.getMillis},$gap,$keyword,$lastTime,$lastExpectTime,$count")
 
-          start = start.minusHours(gap)
-          lastRequireTime = Math.max(reportGap + (lastRequireTime - lastTime), 1).toInt
+            start = start.minusHours(gap)
+            lastExpectTime = Math.max(reportGap + (lastExpectTime - lastTime), 1).toInt
 
-          val newGap = Math.max(formular(lastRequireTime, gap, lastTime, historyGap, historyTime, 1.0), 1)
-          historyGap += gap
-          historyTime += lastTime
-          gap = newGap
+            val newGap = Math.max(formular(lastExpectTime, gap, lastTime, historyGap, historyTime, 1.0), 1)
+            historyGap += gap
+            historyTime += lastTime
+            gap = newGap
+            times += 1
+          }
+          if (start.minusHours(gap).getMillis < end.getMillis && start.getMillis > end.getMillis) {
+            val aql = getAQL(end, new Duration(end, start).getStandardHours.toInt, keyword)
+            val (lastRunTime, avg, count) = multipleTime(0, aql)
 
+            println(s"${DateTime.now.getMillis},${checkPoint.getMillis},$gap,$keyword,$lastRunTime,$lastExpectTime,$count")
+            times += 1
+          }
+          println(s"$times,$keyword,${(DateTime.now.getMillis - batchStart.getMillis) / 1000}")
+          println()
         }
       }
     }
 
-    //TODO add the report penalty
+    def testSamplingPerf(): Unit = {
+       def genPair(): Stream[(DateTime, Int)] = {
+        def s: Stream[DateTime] = end #:: s.map(_.minusHours(gapHour))
+        s.takeWhile(_.getMillis > start.getMillis).map { endTime =>
+          val startTime = new DateTime(Math.max(endTime.minusHours(gapHour).getMillis, start.getMillis))
+          (startTime, new Duration(startTime, endTime).getStandardHours.toInt)
+        }
+      }
+
+    }
+
     def testOverheadOfMultipleQueries(): Unit = {
       val end = new DateTime(2016, 10, 6, 0, 0)
       val start = new DateTime(2016, 7, 1, 0, 0)
@@ -312,6 +356,19 @@ object ResponseTime extends App {
     val groupStatement = GroupStatement(Seq(byHour), Seq(aggrCount))
     //      val query = Query(dataset = "twitter.ds_tweet", filter = Seq(timeFilter), groups = Some(groupStatement))
     val query = Query(dataset = "twitter.ds_tweet", filter = Seq(timeFilter, keywordFilter), globalAggr = Some(globalAggr))
+    gen.generate(query, TwitterDataStore.TwitterSchema)
+  }
+
+  def getSeqTimeAQL(timeSeq: Seq[(DateTime, DateTime)], keywordOpt: Option[String]): String = {
+    val keywordFilterOpt = keywordOpt.map(k => FilterStatement("text", None, Relation.contains, Seq(k)))
+    val timeFilters = timeSeq.map { case (start, end) =>
+      FilterStatement("create_at", None, Relation.inRange, Seq(TimeField.TimeFormat.print(start), TimeField.TimeFormat.print(end)))
+    }
+    val allFilters = keywordFilterOpt match {
+      case Some(kwFilter) => kwFilter +: timeFilters
+      case None => timeFilters
+    }
+    val query = Query(dataset = "twitter.ds_tweet", filter = allFilters, globalAggr = Some(globalAggr))
     gen.generate(query, TwitterDataStore.TwitterSchema)
   }
 
