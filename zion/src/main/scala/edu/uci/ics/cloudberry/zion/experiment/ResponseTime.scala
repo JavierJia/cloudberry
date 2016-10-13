@@ -11,12 +11,11 @@ import edu.uci.ics.cloudberry.zion.model.impl.{AQLGenerator, TwitterDataStore}
 import edu.uci.ics.cloudberry.zion.model.schema._
 import org.asynchttpclient.AsyncHttpClientConfig
 import org.joda.time.{DateTime, Duration}
-import play.api.libs.json.JsValue
 import play.api.libs.ws.WSConfigParser
 import play.api.libs.ws.ahc.{AhcConfigBuilder, AhcWSClient, AhcWSClientConfig}
 import play.api.{Configuration, Environment, Mode}
 
-import scala.concurrent.{Await, ExecutionContext}
+import scala.concurrent.{Await, ExecutionContext, Future}
 
 object ResponseTime extends App {
   val gen = new AQLGenerator()
@@ -80,6 +79,25 @@ object ResponseTime extends App {
     Await.result(f, scala.concurrent.duration.Duration.Inf)
   }
 
+  def timeQuery(aqls: Seq[String], field: String, inParallel: Boolean): (Long, Seq[Int]) = {
+    val start = DateTime.now()
+    if (inParallel) {
+      val f = Future.traverse(aqls) { aql =>
+        asterixConn.postQuery(aql).map { ret => (ret \\ field).map(_.as[Int]).sum }
+      }
+      val counts = Await.result(f, scala.concurrent.duration.Duration.Inf)
+      (DateTime.now.getMillis - start.getMillis, counts)
+    } else {
+      val counts = Seq.newBuilder[Int]
+      aqls.foreach { aql =>
+        val f = asterixConn.postQuery(aql).map(ret => (ret \\ field).map(_.as[Int]).sum)
+        val c = Await.result(f, scala.concurrent.duration.Duration.Inf)
+        counts += c
+      }
+      (DateTime.now.getMillis - start.getMillis, counts.result())
+    }
+  }
+
   def warmUp(): Unit = {
     val aql =
       """
@@ -113,8 +131,9 @@ object ResponseTime extends App {
     //    selectivity(keywords)
     //      keywordWithContinueTime()
     //        elasticTimeGap()
-    elasticAdaptiveGap()
+    // elasticAdaptiveGap()
     //    testOverheadOfMultipleQueries()
+    testSamplingPerf()
 
 
     def selectivity(seq: Seq[Any]): Unit = {
@@ -257,14 +276,30 @@ object ResponseTime extends App {
     }
 
     def testSamplingPerf(): Unit = {
-       def genPair(): Stream[(DateTime, Int)] = {
-        def s: Stream[DateTime] = end #:: s.map(_.minusHours(gapHour))
+      val end = DateTime.now()
+      val start = end.minusDays(90)
+      val verticalMinutesGap = 30
+
+      def genHorizontalPair(horizontalHourSlice: Int, trackBackMinutes: Int): Stream[(DateTime, DateTime)] = {
+        def s: Stream[DateTime] = end #:: s.map(_.minusHours(horizontalHourSlice))
         s.takeWhile(_.getMillis > start.getMillis).map { endTime =>
-          val startTime = new DateTime(Math.max(endTime.minusHours(gapHour).getMillis, start.getMillis))
-          (startTime, new Duration(startTime, endTime).getStandardHours.toInt)
-        }
+          val startTime = new DateTime(Math.max(endTime.minusHours(horizontalHourSlice).getMillis, start.getMillis))
+          val startMinutes = new DateTime(Math.max(
+            endTime.minusMinutes(trackBackMinutes).minusMinutes(verticalMinutesGap).getMillis, startTime.getMillis))
+          (startMinutes, endTime.minusMinutes(trackBackMinutes))
+        }.takeWhile(p => p._1.getMillis < p._2.getMillis)
       }
 
+      val hSlice = 24
+      val inParallel = false
+      for (keyword <- keywords) {
+        val tick = DateTime.now()
+        1 to hSlice * 60 / verticalMinutesGap foreach { i =>
+          val (runTime, results) = timeQuery(getSeqTimeAQL(genHorizontalPair(hSlice, (i - 1) * verticalMinutesGap), keyword), "count", inParallel)
+          println(s"$i,$keyword,$runTime,${results.sum}")
+        }
+        println(s"$keyword,${DateTime.now().getMillis - tick.getMillis}")
+      }
     }
 
     def testOverheadOfMultipleQueries(): Unit = {
@@ -359,17 +394,15 @@ object ResponseTime extends App {
     gen.generate(query, TwitterDataStore.TwitterSchema)
   }
 
-  def getSeqTimeAQL(timeSeq: Seq[(DateTime, DateTime)], keywordOpt: Option[String]): String = {
-    val keywordFilterOpt = keywordOpt.map(k => FilterStatement("text", None, Relation.contains, Seq(k)))
+  def getSeqTimeAQL(timeSeq: Seq[(DateTime, DateTime)], keyword: String): Seq[String] = {
+    val keywordFilter = FilterStatement("text", None, Relation.contains, Seq(keyword))
     val timeFilters = timeSeq.map { case (start, end) =>
       FilterStatement("create_at", None, Relation.inRange, Seq(TimeField.TimeFormat.print(start), TimeField.TimeFormat.print(end)))
     }
-    val allFilters = keywordFilterOpt match {
-      case Some(kwFilter) => kwFilter +: timeFilters
-      case None => timeFilters
+    timeFilters.map { f =>
+      val query = Query(dataset = "twitter.ds_tweet", filter = Seq(keywordFilter, f), globalAggr = Some(globalAggr))
+      gen.generate(query, TwitterDataStore.TwitterSchema)
     }
-    val query = Query(dataset = "twitter.ds_tweet", filter = allFilters, globalAggr = Some(globalAggr))
-    gen.generate(query, TwitterDataStore.TwitterSchema)
   }
 
   def getCountKeyword(keyword: String): String = {
