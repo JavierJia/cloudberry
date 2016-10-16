@@ -133,7 +133,8 @@ object ResponseTime extends App {
     //        elasticTimeGap()
     // elasticAdaptiveGap()
     //    testOverheadOfMultipleQueries()
-    testSamplingPerf()
+//    testSamplingPerf()
+    elasticAdaptiveGap()
 
 
     def selectivity(seq: Seq[Any]): Unit = {
@@ -207,7 +208,7 @@ object ResponseTime extends App {
             println(s"$gap,$keyword,$lastTime,$count")
 
             start = start.minusHours(gap)
-            val newGap = Math.max(formular(requireTime, gap, lastTime, historyGap, historyTime, lambda), 1)
+            val newGap = Math.max(formular(requireTime, 1.0,  gap, lastTime, historyGap, historyTime, lambda), 1)
             historyGap += gap
             historyTime += lastTime
             gap = newGap
@@ -218,8 +219,9 @@ object ResponseTime extends App {
 
     def elasticAdaptiveGap(): Unit = {
       val ExpectGap = 3000
-      1 to 3 foreach { n =>
-        val reportGap = ExpectGap / n
+//      1 to 3 foreach { n =>
+      1 to 1 foreach { n =>
+        val reportGap = ExpectGap
         for (keyword <- keywords) {
           var start = DateTime.now()
           val end = start.minusDays(90)
@@ -256,7 +258,7 @@ object ResponseTime extends App {
             start = start.minusHours(gap)
             lastExpectTime = Math.max(reportGap + (lastExpectTime - lastTime), 1).toInt
 
-            val newGap = Math.max(formular(lastExpectTime, gap, lastTime, historyGap, historyTime, 1.0), 1)
+            val newGap = Math.max(formular(lastExpectTime, 0.7, gap, lastTime, historyGap, historyTime, 1.0), 1)
             historyGap += gap
             historyTime += lastTime
             gap = newGap
@@ -329,8 +331,8 @@ object ResponseTime extends App {
       }
     }
 
-    def formular(requireTime: Int, lastGap: Int, lastTime: Long, histoGap: Int, histoTime: Long, lambda: Double): Int = {
-      lambda * lastGap * requireTime * 1.0 / lastTime +
+    def formular(requireTime: Int, risk : Double, lastGap: Int, lastTime: Long, histoGap: Int, histoTime: Long, lambda: Double): Int = {
+      lambda * lastGap * requireTime * risk / lastTime +
         (1 - lambda) * requireTime * histoGap * 1.0 / histoTime toInt
     }
   }
