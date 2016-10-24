@@ -126,15 +126,15 @@ object ResponseTime extends App {
   def testFirstShot(): Unit = {
     val gaps = Seq(1, 2, 4, 8, 16, 32, 64, 128)
     //    val keywords = Seq("happy", "zika", "uci", "trump", "a")
-    val keywords = Seq("zika", "pitbull", "goal", "bro", "happy")
+    //    val keywords = Seq("zika", "pitbull", "goal", "bro", "happy")
+    val keywords = Seq("zika", "pitbull", "goal", "bro", "trump", "happy")
     //    keywordWithTime()
     //    selectivity(keywords)
     //      keywordWithContinueTime()
-    //        elasticTimeGap()
-    // elasticAdaptiveGap()
+    elasticTimeGap()
     //    testOverheadOfMultipleQueries()
-//    testSamplingPerf()
-    elasticAdaptiveGap()
+    //    testSamplingPerf()
+    //    elasticAdaptiveGap()
 
 
     def selectivity(seq: Seq[Any]): Unit = {
@@ -193,9 +193,9 @@ object ResponseTime extends App {
     }
 
     def elasticTimeGap(): Unit = {
-      val repeat = 15
-      val requireTime = 2000
-      Seq(1.0, 0.9, 0.8, 0.7, 0.6, 0.5).foreach { lambda =>
+      val repeat = 20
+      1 to 5 foreach { i =>
+        val requireTime = 1000 * i
         for (keyword <- keywords) {
           var start = DateTime.now()
           var gap = 2
@@ -208,7 +208,7 @@ object ResponseTime extends App {
             println(s"$gap,$keyword,$lastTime,$count")
 
             start = start.minusHours(gap)
-            val newGap = Math.max(formular(requireTime, 1.0,  gap, lastTime, historyGap, historyTime, lambda), 1)
+            val newGap = Math.max(formular(requireTime, gap, lastTime, historyGap, historyTime, 1), 1)
             historyGap += gap
             historyTime += lastTime
             gap = newGap
@@ -218,13 +218,14 @@ object ResponseTime extends App {
     }
 
     def elasticAdaptiveGap(): Unit = {
-      val ExpectGap = 3000
-//      1 to 3 foreach { n =>
-      1 to 1 foreach { n =>
+      val ExpectGap = 2000
+      val tolerantMills = 200
+      Seq(9, 6, 3, 1) foreach { n =>
+        val risk = 0.1 * n
         val reportGap = ExpectGap
         for (keyword <- keywords) {
           var start = DateTime.now()
-          val end = start.minusDays(90)
+          val end = start.minusDays(150)
           var gap = 2
           var lastExpectTime = ExpectGap
           var (historyGap, historyTime) = (0, 1l)
@@ -233,45 +234,52 @@ object ResponseTime extends App {
           var (checkPoint, numResults) = (DateTime.now().plusMillis(ExpectGap), 0)
           while (start.minusHours(gap).getMillis >= end.getMillis) {
             val aql = getAQL(start.minusHours(gap), gap, keyword)
-            val (lastTime, _, count) = multipleTime(0, aql)
+            val (lastRunTime, _, count) = multipleTime(0, aql)
 
             val now = DateTime.now
+            numResults += 1
+            println(s"${now.getSecondOfDay},${checkPoint.getSecondOfDay},$numResults,$gap,$keyword,$lastRunTime,$lastExpectTime,$count")
+
             var missed = now.getMillis - checkPoint.getMillis
-            if (missed < 200) {
-              numResults += 1
-            } else if (numResults < 1) {
-              println(s"${now.getMillis},${checkPoint.getMillis},$keyword,missed,$missed")
+
+            if (missed > 0) {
+              numResults -= 1
+              if (numResults < 1) {
+                println(s"${now.getSecondOfDay},${checkPoint.getSecondOfDay},$numResults,$keyword,missed,$missed")
+              } else {
+                println(s"${now.getSecondOfDay},${checkPoint.getSecondOfDay},$numResults,$keyword,stocked")
+              }
             }
             while (missed > 0) {
               checkPoint = checkPoint.plusMillis(ExpectGap)
-              numResults = 0
-              missed = now.getMillis - checkPoint.getMillis
-              if (missed < 200) {
-                numResults += 1
-              } else if (numResults < 1) {
-                println(s"${now.getMillis},${checkPoint.getMillis},$keyword,missed,$missed")
+              missed = now.getSecondOfDay - checkPoint.getSecondOfDay
+              if (missed > 0) {
+                if (numResults < 1) {
+                  println(s"${now.getSecondOfDay},${checkPoint.getSecondOfDay},$keyword,missed,$missed")
+                } else {
+                  numResults -= 1
+                  println(s"${now.getSecondOfDay},${checkPoint.getSecondOfDay},$numResults,$keyword,stocked")
+                }
               }
             }
 
-            println(s"${now.getMillis},${checkPoint.getMillis},$gap,$keyword,$lastTime,$lastExpectTime,$count")
-
             start = start.minusHours(gap)
-            lastExpectTime = Math.max(reportGap + (lastExpectTime - lastTime), 1).toInt
+            lastExpectTime = Math.max(reportGap + (lastExpectTime - lastRunTime), 1).toInt
 
-            val newGap = Math.max(formular(lastExpectTime, 0.7, gap, lastTime, historyGap, historyTime, 1.0), 1)
+            val newGap = Math.max(risk * formular(lastExpectTime, gap, lastRunTime, historyGap, historyTime, 1.0), 1)
             historyGap += gap
-            historyTime += lastTime
-            gap = newGap
+            historyTime += lastRunTime
+            gap = newGap.toInt
             times += 1
           }
           if (start.minusHours(gap).getMillis < end.getMillis && start.getMillis > end.getMillis) {
             val aql = getAQL(end, new Duration(end, start).getStandardHours.toInt, keyword)
-            val (lastRunTime, avg, count) = multipleTime(0, aql)
+            val (lastRunTime, _, count) = multipleTime(0, aql)
 
-            println(s"${DateTime.now.getMillis},${checkPoint.getMillis},$gap,$keyword,$lastRunTime,$lastExpectTime,$count")
+            println(s"${DateTime.now.getSecondOfDay()},${checkPoint.getSecondOfDay},$numResults,$gap,$keyword,$lastRunTime,$lastExpectTime,$count")
             times += 1
           }
-          println(s"$times,$keyword,${(DateTime.now.getMillis - batchStart.getMillis) / 1000}")
+          println(s"$times,$keyword,${(DateTime.now.getMillis - batchStart.getMillis)}mills")
           println()
         }
       }
@@ -331,8 +339,8 @@ object ResponseTime extends App {
       }
     }
 
-    def formular(requireTime: Int, risk : Double, lastGap: Int, lastTime: Long, histoGap: Int, histoTime: Long, lambda: Double): Int = {
-      lambda * lastGap * requireTime * risk / lastTime +
+    def formular(requireTime: Int, lastGap: Int, lastTime: Long, histoGap: Int, histoTime: Long, lambda: Double): Int = {
+      lambda * lastGap * requireTime / lastTime +
         (1 - lambda) * requireTime * histoGap * 1.0 / histoTime toInt
     }
   }
