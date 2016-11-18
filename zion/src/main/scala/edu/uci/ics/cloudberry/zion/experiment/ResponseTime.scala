@@ -127,7 +127,7 @@ object ResponseTime extends App {
     val gaps = Seq(1, 2, 4, 8, 16, 32, 64, 128)
     //    val keywords = Seq("happy", "zika", "uci", "trump", "a")
     //    val keywords = Seq("zika", "pitbull", "goal", "bro", "happy")
-    val keywords = Seq("zika", "pitbull", "goal", "bro", "trump", "happy")
+    val keywords = Seq("zika", "flood", "election")
     //    keywordWithTime()
     //    selectivity(keywords)
     //      keywordWithContinueTime()
@@ -193,26 +193,22 @@ object ResponseTime extends App {
     }
 
     def elasticTimeGap(): Unit = {
-      val repeat = 20
-      1 to 5 foreach { i =>
+      val terminate = DateTime.now().minusYears(1)
+      1 to 3 foreach { i =>
         val requireTime = 1000 * i
         for (keyword <- keywords) {
-          var start = DateTime.now()
-          var gap = 2
-          var (historyGap, historyTime) = (0, 1l)
-          1 to repeat foreach { i =>
+          def streamRun(endTime: DateTime, range: Int, target: Int): Stream[DateTime] = {
+            val start = endTime.minusHours(range)
+            val aql = getAQL(start, range, keyword)
+            val (runTime, _, count) = multipleTime(0, aql)
+            println(s"$range,$keyword,$target,$runTime,$count")
 
-            val aql = getAQL(start.minusHours(gap), gap, keyword)
-            val (lastTime, avg, count) = multipleTime(0, aql)
+            val nextTarget = requireTime + Math.max(target - runTime.toInt, 0)
+            val nextRange = Math.max(formular(nextTarget, range, runTime, 1, 1, lambda = 1), 1)
 
-            println(s"$gap,$keyword,$lastTime,$count")
-
-            start = start.minusHours(gap)
-            val newGap = Math.max(formular(requireTime, gap, lastTime, historyGap, historyTime, 1), 1)
-            historyGap += gap
-            historyTime += lastTime
-            gap = newGap
+            endTime #:: streamRun(start, nextRange, nextTarget)
           }
+          streamRun(DateTime.now(), 2, requireTime).takeWhile(_.getMillis > terminate.getMillis).toList
         }
       }
     }
