@@ -27,6 +27,7 @@ object ResponseTime extends App {
   implicit val mat = ActorMaterializer()
   val wsClient = produceWSClient()
   val url = "http://actinium.ics.uci.edu:19002/aql"
+//  val url = "http://localhost:19002/aql"
   val asterixConn = new AsterixConn(url, wsClient)
 
   warmUp()
@@ -55,7 +56,7 @@ object ResponseTime extends App {
     val environment = Environment(new File("."), this.getClass.getClassLoader, Mode.Prod)
 
     val parser = new WSConfigParser(configuration, environment)
-    val config = new AhcWSClientConfig(wsClientConfig = parser.parse())
+    val config = AhcWSClientConfig(wsClientConfig = parser.parse())
     val builder = new AhcConfigBuilder(config)
     val logging = new AsyncHttpClientConfig.AdditionalChannelInitializer() {
       override def initChannel(channel: io.netty.channel.Channel): Unit = {
@@ -127,7 +128,7 @@ object ResponseTime extends App {
     val gaps = Seq(1, 2, 4, 8, 16, 32, 64, 128)
     //    val keywords = Seq("happy", "zika", "uci", "trump", "a")
     //    val keywords = Seq("zika", "pitbull", "goal", "bro", "happy")
-    val keywords = Seq("zika", "flood", "election")
+    val keywords = Seq("zika", "flood", "election", "clinton")
     //    keywordWithTime()
     //    selectivity(keywords)
     //      keywordWithContinueTime()
@@ -194,21 +195,27 @@ object ResponseTime extends App {
 
     def elasticTimeGap(): Unit = {
       val terminate = DateTime.now().minusYears(1)
-      1 to 3 foreach { i =>
-        val requireTime = 1000 * i
+      1 to 4 foreach { i =>
+        val requireTime = 500 * i
         for (keyword <- keywords) {
-          def streamRun(endTime: DateTime, range: Int, target: Int): Stream[DateTime] = {
+          def streamRun(endTime: DateTime, range: Int, target: Int): Stream[(DateTime, Int)] = {
             val start = endTime.minusHours(range)
             val aql = getAQL(start, range, keyword)
             val (runTime, _, count) = multipleTime(0, aql)
-            println(s"$range,$keyword,$target,$runTime,$count")
+            println(s"$start,$range,$keyword,$target,$runTime,$count")
 
             val nextTarget = requireTime + Math.max(target - runTime.toInt, 0)
             val nextRange = Math.max(formular(nextTarget, range, runTime, 1, 1, lambda = 1), 1)
 
-            endTime #:: streamRun(start, nextRange, nextTarget)
+            (endTime, target - runTime.toInt) #:: streamRun(start, nextRange, nextTarget)
           }
-          streamRun(DateTime.now(), 2, requireTime).takeWhile(_.getMillis > terminate.getMillis).toList
+          val tick = DateTime.now()
+
+          val list = streamRun(DateTime.now(), 2, requireTime).takeWhile(_._1.getMillis > terminate.getMillis).toList
+          // run an entire query
+          // val list = streamRun(DateTime.now(), new Duration(terminate, DateTime.now()).getStandardHours.toInt * 2, requireTime).takeWhile(_._1.getMillis > terminate.getMillis).toList
+          val tock = DateTime.now()
+          println(s"$requireTime,$keyword,${list.size},${list.count(_._2 < 0)},${list.filter(_._2 < 0).map(_._2).sum},${tock.getMillis - tick.getMillis}")
         }
       }
     }
@@ -272,10 +279,10 @@ object ResponseTime extends App {
             val aql = getAQL(end, new Duration(end, start).getStandardHours.toInt, keyword)
             val (lastRunTime, _, count) = multipleTime(0, aql)
 
-            println(s"${DateTime.now.getSecondOfDay()},${checkPoint.getSecondOfDay},$numResults,$gap,$keyword,$lastRunTime,$lastExpectTime,$count")
+            println(s"${DateTime.now.getSecondOfDay},${checkPoint.getSecondOfDay},$numResults,$gap,$keyword,$lastRunTime,$lastExpectTime,$count")
             times += 1
           }
-          println(s"$times,$keyword,${(DateTime.now.getMillis - batchStart.getMillis)}mills")
+          println(s"$times,$keyword,${DateTime.now.getMillis - batchStart.getMillis}mills")
           println()
         }
       }
@@ -336,8 +343,9 @@ object ResponseTime extends App {
     }
 
     def formular(requireTime: Int, lastGap: Int, lastTime: Long, histoGap: Int, histoTime: Long, lambda: Double): Int = {
-      lambda * lastGap * requireTime / lastTime +
-        (1 - lambda) * requireTime * histoGap * 1.0 / histoTime toInt
+      val nextGap = lambda * lastGap * requireTime / lastTime +
+        (1 - lambda) * requireTime * histoGap * 1.0 / histoTime
+      Math.min(nextGap.toInt, lastGap * 2)
     }
   }
 
@@ -422,6 +430,19 @@ object ResponseTime extends App {
       Seq(TimeField.TimeFormat.print(start),
         TimeField.TimeFormat.print(end)))
     val query = Query(dataset = "twitter.ds_tweet", filter = Seq(timeFilter), globalAggr = Some(globalAggr))
+    gen.generate(query, TwitterDataStore.TwitterSchema)
+  }
+
+  def getTopK: String = {
+    val query = Query(
+      dataset = "twitter.ds_tweet",
+      unnest = Seq(UnnestStatement("hashtags", "tag")),
+      groups = Some(
+        GroupStatement(
+          Seq(ByStatement(fieldName = "tag", None, None),
+            ByStatement("create_at", Some(Interval(TimeUnit.Day)), Some("day"))),
+          Seq(AggregateStatement("*", Count, "count"))
+        )))
     gen.generate(query, TwitterDataStore.TwitterSchema)
   }
 
