@@ -15,15 +15,18 @@ import play.api.libs.ws.WSConfigParser
 import play.api.libs.ws.ahc.{AhcConfigBuilder, AhcWSClient, AhcWSClientConfig}
 import play.api.{Configuration, Environment, Mode}
 
+import scala.collection.mutable.ListBuffer
 import scala.concurrent.{Await, ExecutionContext, Future}
 
 trait Connection {
+
+  case class QueryStat(targetMS: Int, estSlice: Int, actualMS: Int)
 
   implicit val cmp: Ordering[DateTime] = Ordering.by(_.getMillis)
   val urStartDate = new DateTime(2016, 11, 4, 15, 47)
   val urEndDate = new DateTime(2017, 1, 17, 6, 16)
 
-  val keywords = Seq("zika", "flood", "election", "clinton")
+  val keywords = Seq("zika", "flood", "election", "clinton", "trump", "happy", "")
 
   val gen = new AQLGenerator()
   val aggrCount = AggregateStatement("*", Count, "count")
@@ -129,9 +132,9 @@ object ResponseTime extends App with Connection {
   //  exit()
 
   //  warmUp()
-  searchBreakdown(gen)
-//  startToEnd()
-  //  testFirstShot()
+  //  searchBreakdown(gen)
+  //  startToEnd()
+  testAdaptiveShot()
 
 
   def warmUp(): Unit = {
@@ -160,14 +163,15 @@ object ResponseTime extends App with Connection {
   }
 
   def startToEnd(): Unit = {
-    for (keyword <- keywords) {
-      val aql = getAQL(urStartDate, new Duration(urStartDate, urEndDate).getStandardHours.toInt, keyword)
-      val (runTime, avgTime, count) = multipleTime(3, aql)
+    //    for (keyword <- keywords) {
+    for (keyword <- Seq("zika")) {
+      val aql = getAQL(urStartDate, new Duration(urStartDate, urEndDate).getStandardHours.toInt, Some(keyword))
+      val (runTime, avgTime, count) = multipleTime(0, aql)
       println(s"$urStartDate,$urEndDate,$keyword, cold:$runTime, warm: $avgTime, $count")
     }
   }
 
-  def testFirstShot(): Unit = {
+  def testAdaptiveShot(): Unit = {
     val gaps = Seq(1, 2, 4, 8, 16, 32, 64, 128)
     //    val keywords = Seq("happy", "zika", "uci", "trump", "a")
     //    val keywords = Seq("zika", "pitbull", "goal", "bro", "happy")
@@ -175,6 +179,7 @@ object ResponseTime extends App with Connection {
     //    selectivity(keywords)
     //      keywordWithContinueTime()
     elasticTimeGap()
+    //    minimalTimeGap()
     //    testOverheadOfMultipleQueries()
     //    testSamplingPerf()
     //    elasticAdaptiveGap()
@@ -204,7 +209,7 @@ object ResponseTime extends App with Connection {
         for (keyword <- keywords) {
           clearCache()
           val now = DateTime.now()
-          val aql = getAQL(now.minusHours(gap), gap, keyword)
+          val aql = getAQL(now.minusHours(gap), gap, Some(keyword))
 
           val (firstTime, avg, count) = multipleTime(0, aql)
           println(s"gap:$gap\tkeyword:$keyword")
@@ -222,7 +227,7 @@ object ResponseTime extends App with Connection {
           var start = DateTime.now()
           1 to repeat foreach { i =>
 
-            val aql = getAQL(start.minusHours(gap), gap, keyword)
+            val aql = getAQL(start.minusHours(gap), gap, Some(keyword))
             val (firstTime, avg, count) = multipleTime(0, aql)
             println(
               s"""
@@ -235,19 +240,65 @@ object ResponseTime extends App with Connection {
       }
     }
 
-    def elasticTimeGap(): Unit = {
+    // a + bx
+    def linearInterpolation(history: List[QueryStat], totalNumber: Int): (Double, Double) = {
+      val (a2, b2, ab, a, b) = history.takeRight(totalNumber).foldRight((0l, 0l, 0l, 0l, 0l)) {
+        case (stats: QueryStat, (lastA2, lastB2, lastAB, lastA, lastB)) =>
+          (
+            lastA2 + 1,
+            lastB2 + stats.estSlice * stats.estSlice,
+            lastAB + 2 * stats.estSlice,
+            lastA + 2 * stats.actualMS,
+            lastB + 2 * stats.estSlice * stats.actualMS
+          )
+      }
+      //      b2 += range * range
+      //      a2 += 1
+      //      ab += 2 * range
+      //      a += 2 * runTime.toInt
+      //      b += 2 * range * runTime.toInt
+      val divider = 2 * b2 - ab * ab / (2.0 * a2)
+
+      val xbRaw = (b - a * ab / (2.0 * a2)) / (if (divider == 0) Double.MinPositiveValue else divider)
+      val xb = Math.max(xbRaw, Double.MinPositiveValue)
+      val xa = (b - 2.0 * b2 * xb) / ab
+      (xa, xb)
+    }
+
+    def distance(xa: Double, xb: Double, x: Double, y: Double): Double = {
+      val thY = xb * x + xa
+      val thX = (y - xa) / xb
+      val lineA = Math.abs(x - thX)
+      val lineB = Math.abs(y - thY)
+      val lineC = Math.sqrt(lineA * lineA + lineB * lineB)
+      lineA * lineB / lineC
+    }
+
+    def minimalTimeGap(): Unit = {
       val terminate = urStartDate
-      1 to 4 foreach { i =>
-        val requireTime = 500 * i
+      //      1 to 25 by 2 foreach { i =>
+      Seq(1, 3000) foreach { i =>
+        //      1 to 4 foreach { i =>
+        //        val requireTime = 500 * i
+        val requireTime = 2000
         for (keyword <- keywords) {
+          var (b2, a2, ab, a, b) = (0l, 0l, 0l, 0l, 0l)
+
           def streamRun(endTime: DateTime, range: Int, target: Int): Stream[(DateTime, Int)] = {
             val start = endTime.minusHours(range)
-            val aql = getAQL(start, range, keyword)
+            val aql = getAQL(start, range, if (keyword.length > 0) Some(keyword) else None)
             val (runTime, _, count) = multipleTime(0, aql)
-            println(s"$start,$range,$keyword,$target,$runTime,$count")
+
+            //            println(s"$start,$range,$keyword,$target,$runTime,$count")
+            b2 += range * range
+            a2 += 1
+            ab += 2 * range
+            a += 2 * runTime.toInt
+            b += 2 * range * runTime.toInt
 
             val nextTarget = requireTime + Math.max(target - runTime.toInt, 0)
-            val nextRange = Math.max(formular(nextTarget, range, runTime, 1, 1, lambda = 1), 1)
+            //            val nextRange = Math.max(formular(nextTarget, range, runTime, b2, a2, ab, b, a, lambda = 1), 1)
+            val nextRange = i
 
             (endTime, target - runTime.toInt) #:: streamRun(start, nextRange, nextTarget)
           }
@@ -258,76 +309,58 @@ object ResponseTime extends App with Connection {
           // run an entire query
           // val list = streamRun(DateTime.now(), new Duration(terminate, DateTime.now()).getStandardHours.toInt * 2, requireTime).takeWhile(_._1.getMillis > terminate.getMillis).toList
           val tock = DateTime.now()
-          println(s"$requireTime,$keyword,${list.size},${list.count(_._2 < 0)},${list.filter(_._2 < 0).map(_._2).sum},${tock.getMillis - tick.getMillis}")
+          val totalTime = tock.getMillis - tick.getMillis
+          val penalty = list.count(_._2 < 0)
+          val sumPenalty = list.filter(_._2 < 0).map(_._2).sum
+          println(s"$i,$requireTime,$keyword,${list.size},${penalty},${sumPenalty},${totalTime},${totalTime / list.size}")
+          //          val (xb, xa) = linearInterpolation(b2, a2, ab, b, a)
+          //          println(s"interpolation: b = $xb, a = $xa")
         }
       }
     }
 
 
-    def elasticAdaptiveGap(): Unit = {
-      val ExpectGap = 2000
-      val tolerantMills = 200
-      Seq(9, 6, 3, 1) foreach { n =>
-        val risk = 0.1 * n
-        val reportGap = ExpectGap
-        for (keyword <- keywords) {
-          var start = DateTime.now()
-          val end = start.minusDays(150)
-          var gap = 2
-          var lastExpectTime = ExpectGap
-          var (historyGap, historyTime) = (0, 1l)
-          val batchStart = DateTime.now()
-          var times = 0
-          var (checkPoint, numResults) = (DateTime.now().plusMillis(ExpectGap), 0)
-          while (start.minusHours(gap).getMillis >= end.getMillis) {
-            val aql = getAQL(start.minusHours(gap), gap, keyword)
-            val (lastRunTime, _, count) = multipleTime(0, aql)
+    def elasticTimeGap(): Unit = {
 
-            val now = DateTime.now
-            numResults += 1
-            println(s"${now.getSecondOfDay},${checkPoint.getSecondOfDay},$numResults,$gap,$keyword,$lastRunTime,$lastExpectTime,$count")
+      //      def isNoise(b2: Long, a2: Long, ab: Long, a : Long, b: Long, range: Int, runTime: Long) : Boolean = {
 
-            var missed = now.getMillis - checkPoint.getMillis
+      //      }
 
-            if (missed > 0) {
-              numResults -= 1
-              if (numResults < 1) {
-                println(s"${now.getSecondOfDay},${checkPoint.getSecondOfDay},$numResults,$keyword,missed,$missed")
-              } else {
-                println(s"${now.getSecondOfDay},${checkPoint.getSecondOfDay},$numResults,$keyword,stocked")
-              }
-            }
-            while (missed > 0) {
-              checkPoint = checkPoint.plusMillis(ExpectGap)
-              missed = now.getSecondOfDay - checkPoint.getSecondOfDay
-              if (missed > 0) {
-                if (numResults < 1) {
-                  println(s"${now.getSecondOfDay},${checkPoint.getSecondOfDay},$keyword,missed,$missed")
-                } else {
-                  numResults -= 1
-                  println(s"${now.getSecondOfDay},${checkPoint.getSecondOfDay},$numResults,$keyword,stocked")
-                }
-              }
-            }
+      val terminate = urStartDate
+      //        0.9 to 0.1 by -0.1 foreach { discount =>
+      65 to 65 foreach { minGap=>
+        val requireTime = 2000
+      for (keyword <- keywords) {
+          val history = List.newBuilder[QueryStat]
 
-            start = start.minusHours(gap)
-            lastExpectTime = Math.max(reportGap + (lastExpectTime - lastRunTime), 1).toInt
+          def streamRun(endTime: DateTime, range: Int, target: Int, discountTarget: Int): Stream[(DateTime, Int)] = {
+            val start = endTime.minusHours(range)
+            val aql = getAQL(start, range, if (keyword.length > 0) Some(keyword) else None)
+            val (runTime, _, count) = multipleTime(0, aql)
 
-            val newGap = Math.max(risk * formular(lastExpectTime, gap, lastRunTime, historyGap, historyTime, 1.0), 1)
-            historyGap += gap
-            historyTime += lastRunTime
-            gap = newGap.toInt
-            times += 1
+            history += QueryStat(discountTarget, range, runTime.toInt)
+            println(s"$start,$range,$keyword,$target,$discountTarget,$runTime,$count")
+
+            val diff = if (runTime <= target) target - runTime else -((runTime - target) % requireTime)
+            val nextTarget = requireTime + diff.toInt
+
+            val estTarget = estimateTarget(nextTarget, history.result())
+            val nextRange = Math.max(formular(estTarget, range, runTime, history.result(), lambda = 1), 1)
+//            val nextRange = minGap
+
+            (endTime, target - runTime.toInt) #:: streamRun(start, nextRange, nextTarget, estTarget)
           }
-          if (start.minusHours(gap).getMillis < end.getMillis && start.getMillis > end.getMillis) {
-            val aql = getAQL(end, new Duration(end, start).getStandardHours.toInt, keyword)
-            val (lastRunTime, _, count) = multipleTime(0, aql)
 
-            println(s"${DateTime.now.getSecondOfDay},${checkPoint.getSecondOfDay},$numResults,$gap,$keyword,$lastRunTime,$lastExpectTime,$count")
-            times += 1
-          }
-          println(s"$times,$keyword,${DateTime.now.getMillis - batchStart.getMillis}mills")
-          println()
+          val tick = DateTime.now()
+
+          val list = streamRun(urEndDate, 2, requireTime, requireTime).takeWhile(_._1.getMillis > terminate.getMillis).toList
+          val tock = DateTime.now()
+          val totalTime = tock.getMillis - tick.getMillis
+          val penalty = list.filter(_._2 < 0).map(_._2).map(x => Math.ceil(-x.toDouble / requireTime)).sum
+          val sumPenalty = list.filter(_._2 < 0).map(_._2).sum
+          println(s"$requireTime,$minGap,$keyword,${list.size},${penalty},${sumPenalty},${totalTime},${totalTime / list.size}, ${Math.ceil(totalTime.toDouble / requireTime)}")
+          val (xa, xb) = linearInterpolation(history.result(), history.result().size)
+          println(s"interpolation: b = $xb, a = $xa")
         }
       }
     }
@@ -378,7 +411,7 @@ object ResponseTime extends App with Connection {
         for (keyword <- keywords) {
           val begin = DateTime.now()
           genPair(gap).foreach { case (startTime, g) =>
-            val aql = getAQL(startTime, g, keyword)
+            val aql = getAQL(startTime, g, Some(keyword))
             val (lastTime, _, count) = multipleTime(0, aql)
             println(s"$keyword,$startTime,$g,$lastTime,$count")
           }
@@ -388,10 +421,35 @@ object ResponseTime extends App with Connection {
       }
     }
 
-    def formular(requireTime: Int, lastGap: Int, lastTime: Long, histoGap: Int, histoTime: Long, lambda: Double): Int = {
-      val nextGap = lambda * lastGap * requireTime / lastTime +
-        (1 - lambda) * requireTime * histoGap * 1.0 / histoTime
-      Math.min(nextGap.toInt, lastGap * 2)
+    def estimateTarget(target: Int, history: List[QueryStat]): Int = {
+      // 1. use percent discount
+      // 2. use abs difference
+      // 3. find the median of the values
+      val values = (Seq(0.0) ++ history.map(s => (s.actualMS.toDouble - s.targetMS) / s.targetMS).filter(_ > 0)).sorted
+      val avg = values.sum / (values.size + Double.MinPositiveValue)
+      val discount = avg
+      Math.ceil(target / (1 + discount)).toInt
+    }
+
+    def formular(targetMS: Int, lastGap: Int, lastTime: Long, history: List[QueryStat], lambda: Double): Int = {
+      if (history.size > 3) {
+        val (xa, xb) = linearInterpolation(history, history.size)
+        val dist = distance(xa, xb, lastGap, lastTime)
+        println(s"interpolation: b = $xb, a = $xa, lastDistance: $dist")
+
+        val lastEST = xa + xb * lastGap
+        val noise = lastTime - lastEST
+
+        val nextGap = ((targetMS - noise - xa) / xb).toInt
+        Math.min(nextGap, lastGap * 2)
+      } else {
+        val nextGap = lastGap * targetMS / lastTime
+        Math.min(nextGap.toInt, lastGap * 2)
+      }
+
+      //      val nextGap = lambda * lastGap * requireTime / lastTime +
+      //        (1 - lambda) * requireTime * histoGap * 1.0 / histoTime
+      //      Math.min(nextGap.toInt, lastGap * 2)
     }
   }
 
@@ -410,7 +468,7 @@ object ResponseTime extends App with Connection {
       val stop = start.plusHours(24)
 
       while (start.getMillis < stop.getMillis) {
-        val aql = getAQL(start, gap, "happy")
+        val aql = getAQL(start, gap, Some("happy"))
         val (time, count) = timeQuery(aql, "count")
         if (count > countPerGap * gap) {
           times += 1
@@ -424,15 +482,15 @@ object ResponseTime extends App with Connection {
   }
 
 
-  def getAQL(start: DateTime, gapHour: Int, keyword: String): String = {
-    val keywordFilter = FilterStatement("text", None, Relation.contains, Seq(keyword))
+  def getAQL(start: DateTime, gapHour: Int, keyword: Option[String]): String = {
+    val keywordFilter = keyword.map(k => FilterStatement("text", None, Relation.contains, Seq(k)))
     val timeFilter = FilterStatement("create_at", None, Relation.inRange,
       Seq(TimeField.TimeFormat.print(start),
         TimeField.TimeFormat.print(start.plusHours(gapHour))))
     val byHour = ByStatement("create_at", Some(Interval(TimeUnit.Minute, 10 * gapHour)), Some("hour"))
     val groupStatement = GroupStatement(Seq(byHour), Seq(aggrCount))
     //      val query = Query(dataset = "twitter.ds_tweet", filter = Seq(timeFilter), groups = Some(groupStatement))
-    val query = Query(dataset = "twitter.ds_tweet", filter = Seq(timeFilter, keywordFilter), globalAggr = Some(globalAggr))
+    val query = Query(dataset = "twitter.ds_tweet", filter = keywordFilter.map(Seq(timeFilter, _)).getOrElse(Seq(timeFilter)), globalAggr = Some(globalAggr))
     gen.generate(query, TwitterDataStore.TwitterSchema)
   }
 
@@ -502,6 +560,19 @@ object ResponseTime extends App with Connection {
          |}
        """.stripMargin
 
+    def countAQLByTime(s: DateTime, e: DateTime) =
+      s"""
+         |{
+         |'count':
+         |count(
+         |for $$t in dataset twitter.ds_tweet
+         |where $$t.create_at >= datetime('${TimeField.TimeFormat.print(s)}')
+         |and   $$t.create_at < datetime('${TimeField.TimeFormat.print(e)}')
+         |return $$t.id
+         |)
+         |}
+       """.stripMargin
+
     def sortAQL(key: String, s: DateTime, e: DateTime) =
       s"""
          |{
@@ -553,36 +624,44 @@ object ResponseTime extends App with Connection {
       if (s.getMillis >= e.getMillis) {
         return (0, 0.0, 0, 0.0, 0, 0.0, 0)
       }
-      println(s"start:$s,end:$e")
+      println(s"start:${TimeField.TimeFormat.print(s)},end:${TimeField.TimeFormat.print(e)}")
 
-      println("+sort")
-      val qSort = sortAQL(key, s, e)
-      val (f2, avg2, count2) = multipleTime(3, qSort)
-      println(s"firstTime\t$f2\tavg\t$avg2\tcount\t$count2")
-
-      println("start full count query")
-      val qCount = countAQL(key, s, e)
-      val (f1, avg1, count) = multipleTime(3, qCount)
+      //      println("start full count query")
+      //      val qCount = countAQL(key, s, e)
+      val qCount = countAQLByTime(s, e)
+      val (f1, avg1, count) = multipleTime(2, qCount)
       println(s"firstTime\t$f1\tavg\t$avg1\tcount\t$count")
 
-      val ids = getIDs(getIDsAQL(key, s, e))
-      println("primary index search only")
-      val qPIdx = idToPIndexAQL(ids, s, e)
-      val (f3, avg3, count3) = multipleTime(3, qPIdx)
-      println(s"firstTime\t$f3\tavg\t$avg3\tcount\t$count3")
-
-      (f1, avg1, f2, avg2, f3, avg3, count)
-//        (f1, avg1, 0, 0.0, 0, 0.0, count)
+      //     println("+sort")
+      //     val qSort = sortAQL(key, s, e)
+      //     val (f2, avg2, count2) = multipleTime(3, qSort)
+      //     println(s"firstTime\t$f2\tavg\t$avg2\tcount\t$count2")
+      //
+      //     println("start full count query")
+      //     val qCount = countAQL(key, s, e)
+      //     val (f1, avg1, count) = multipleTime(3, qCount)
+      //     println(s"firstTime\t$f1\tavg\t$avg1\tcount\t$count")
+      //
+      //     val ids = getIDs(getIDsAQL(key, s, e))
+      //     println("primary index search only")
+      //     val qPIdx = idToPIndexAQL(ids, s, e)
+      //     val (f3, avg3, count3) = multipleTime(3, qPIdx)
+      //     println(s"firstTime\t$f3\tavg\t$avg3\tcount\t$count3")
+      //
+      //     (f1, avg1, f2, avg2, f3, avg3, count)
+      (f1, avg1, 0, 0.0, 0, 0.0, count)
     }
 
     val hours = new Duration(urStartDate, urEndDate).toStandardHours.getHours
 
-    for (key <- keywords) {
-//    for (key <- Seq("zika")) {
-      0 to 7 foreach { base =>
-//      2 to 2 foreach { base =>
-        val slice = 1 << base
-        println(s"slice:$slice")
+    //        for (key <- keywords) {
+    for (key <- Seq("trump")) {
+      //      0 to 7 foreach { base =>
+      //      7 to 7 foreach { base =>
+      //        val slice = 1 << base
+      for (slice <- 200 to 300 by 10) {
+        //      for (slice <- 250 to 250) {
+        //        println(s"slice:$slice")
         val step = hours / slice
         var (sumCountFirst, sumSortFirst, sumPIdxFirst) = (0.0, 0.0, 0.0)
         var (sumCountAvg, sumSortAvg, sumPIdxAvg) = (0.0, 0.0, 0.0)
@@ -595,11 +674,16 @@ object ResponseTime extends App with Connection {
           sumSortAvg += avgSort
           sumPIdxAvg += avgPIdx
         }
+        //        println(
+        //          s"""
+        //             |$key, slice:$slice, average: count only time:$sumCountAvg, with sort time:$sumSortAvg, sort self:${sumSortAvg - sumCountAvg}, pIndex:$sumPIdxAvg")
+        //             |$key, slice:$slice, first  : count only time:$sumCountFirst, with sort time:$sumSortFirst, sort self:${sumSortFirst - sumCountFirst}, pIndex:$sumPIdxFirst")
+        //           """.stripMargin)
         println(
           s"""
-             |$key, slice:$slice, average: count only time:$sumCountAvg, with sort time:$sumSortAvg, sort self:${sumSortAvg - sumCountAvg}, pIndex:$sumPIdxAvg")
-             |$key, slice:$slice, first  : count only time:$sumCountFirst, with sort time:$sumSortFirst, sort self:${sumSortFirst - sumCountFirst}, pIndex:$sumPIdxFirst")
-           """.stripMargin)
+             |$key, slice:$slice, cold time:$sumCountFirst, cold avg: ${sumCountFirst * 1.0 / slice}
+             |$key, slice:$slice, hot time:$sumCountAvg, hot avg: ${sumCountAvg * 1.0 / slice}
+             |""".stripMargin)
       }
     }
   }
@@ -610,11 +694,17 @@ object ResponseTime extends App with Connection {
          |{
          |'count':
          |count(
-         |for $$id in [ ${seqId.mkString(",")} ]
+         |for $$id in [ ${
+        seqId.mkString(",")
+      } ]
          |for $$t in dataset twitter.ds_tweet
          |where $$id = $$t.id
-         |and $$t.create_at >= datetime("${TimeField.TimeFormat.print(s)}")
-         |and $$t.create_at <  datetime("${TimeField.TimeFormat.print(e)}")
+         |and $$t.create_at >= datetime("${
+        TimeField.TimeFormat.print(s)
+      }")
+         |and $$t.create_at <  datetime("${
+        TimeField.TimeFormat.print(e)
+      }")
          |return $$t.id
          |)
          |}
@@ -622,23 +712,25 @@ object ResponseTime extends App with Connection {
 
     val start = new DateTime(2016, 1, 1, 0, 0)
 
-    Stream.iterate(365)(n => n / 2).takeWhile(_ > 0).foreach { slices =>
+    Stream.iterate(365)(n => n / 2).takeWhile(_ > 0).foreach {
+      slices =>
 
-      val days = 365 / slices
+        val days = 365 / slices
 
-      println(s"slice:$slices")
-      var (sumFirst, sumAvg) = (0.0, 0.0)
-      0 to 364 by days foreach { offset =>
-        val ids = Data.ids.slice(offset, offset + days)
-        val s = start.plusDays(offset)
-        val e = Seq(s.plusDays(days), start.plusYears(1)).min
-        val aql = toAQL(ids, s, e)
-        val (first, avg, count) = multipleTime(1, aql)
-        println(s"days: $days, first: $first, avg: $avg, count: $count")
-        sumFirst += first
-        sumAvg += avg
-      }
-      println(s"slice:$slices, first: $sumFirst, avg: $sumAvg")
+        println(s"slice:$slices")
+        var (sumFirst, sumAvg) = (0.0, 0.0)
+        0 to 364 by days foreach {
+          offset =>
+            val ids = Data.ids.slice(offset, offset + days)
+            val s = start.plusDays(offset)
+            val e = Seq(s.plusDays(days), start.plusYears(1)).min
+            val aql = toAQL(ids, s, e)
+            val (first, avg, count) = multipleTime(1, aql)
+            println(s"days: $days, first: $first, avg: $avg, count: $count")
+            sumFirst += first
+            sumAvg += avg
+        }
+        println(s"slice:$slices, first: $sumFirst, avg: $sumAvg")
     }
   }
 
