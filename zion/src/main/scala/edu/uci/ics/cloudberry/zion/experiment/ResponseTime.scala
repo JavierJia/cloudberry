@@ -328,7 +328,7 @@ object ResponseTime extends App with Connection {
 
       val terminate = urStartDate
       //        0.9 to 0.1 by -0.1 foreach { discount =>
-      65 to 65 foreach { minGap=>
+      45 to 2600 by 5 foreach { minGap=>
         val requireTime = 2000
       for (keyword <- keywords) {
           val history = List.newBuilder[QueryStat]
@@ -345,8 +345,8 @@ object ResponseTime extends App with Connection {
             val nextTarget = requireTime + diff.toInt
 
             val estTarget = estimateTarget(nextTarget, history.result())
-            val nextRange = Math.max(formular(estTarget, range, runTime, history.result(), lambda = 1), 1)
-//            val nextRange = minGap
+//            val nextRange = Math.max(formular(estTarget, range, runTime, history.result(), lambda = 1), 1)
+            val nextRange = minGap
 
             (endTime, target - runTime.toInt) #:: streamRun(start, nextRange, nextTarget, estTarget)
           }
