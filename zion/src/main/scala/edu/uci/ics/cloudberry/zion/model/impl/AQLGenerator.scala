@@ -8,6 +8,9 @@ import scala.collection.mutable
 
 class AQLGenerator extends IQLGenerator {
 
+  def generate(query: IQuery, schema: Schema): String = {
+    generate(query, Map(query.dataset -> schema))
+  }
   /**
     * Returns a string having AQL query after parsing the query object.
     *

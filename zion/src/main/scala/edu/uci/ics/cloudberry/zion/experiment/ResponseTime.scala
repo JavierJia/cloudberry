@@ -9,6 +9,9 @@ import com.typesafe.config.ConfigFactory
 import edu.uci.ics.cloudberry.zion.model.datastore.AsterixConn
 import edu.uci.ics.cloudberry.zion.model.impl.{AQLGenerator, TwitterDataStore}
 import edu.uci.ics.cloudberry.zion.model.schema._
+import org.apache.commons.math3.distribution.NormalDistribution
+import org.apache.commons.math3.fitting.{PolynomialCurveFitter, WeightedObservedPoint, WeightedObservedPoints}
+import org.apache.commons.math3.stat.descriptive.DescriptiveStatistics
 import org.asynchttpclient.AsyncHttpClientConfig
 import org.joda.time.{DateTime, Duration}
 import play.api.libs.ws.WSConfigParser
@@ -25,6 +28,8 @@ trait Connection {
   implicit val cmp: Ordering[DateTime] = Ordering.by(_.getMillis)
   val urStartDate = new DateTime(2016, 11, 4, 15, 47)
   val urEndDate = new DateTime(2017, 1, 17, 6, 16)
+  val numberLSMs = 262
+  val unit = new Duration(urStartDate, urEndDate).dividedBy(numberLSMs).getStandardHours
 
   val keywords = Seq("zika", "flood", "election", "clinton", "trump", "happy", "")
 
@@ -322,15 +327,12 @@ object ResponseTime extends App with Connection {
 
     def elasticTimeGap(): Unit = {
 
-      //      def isNoise(b2: Long, a2: Long, ab: Long, a : Long, b: Long, range: Int, runTime: Long) : Boolean = {
-
-      //      }
-
       val terminate = urStartDate
       //        0.9 to 0.1 by -0.1 foreach { discount =>
-      45 to 2600 by 5 foreach { minGap=>
+      //      45 to 2600 by 5 foreach { minGap=>
+      1 to 1 foreach { x =>
         val requireTime = 2000
-      for (keyword <- keywords) {
+        for (keyword <- keywords) {
           val history = List.newBuilder[QueryStat]
 
           def streamRun(endTime: DateTime, range: Int, target: Int, discountTarget: Int): Stream[(DateTime, Int)] = {
@@ -345,8 +347,8 @@ object ResponseTime extends App with Connection {
             val nextTarget = requireTime + diff.toInt
 
             val estTarget = estimateTarget(nextTarget, history.result())
-//            val nextRange = Math.max(formular(estTarget, range, runTime, history.result(), lambda = 1), 1)
-            val nextRange = minGap
+            val nextRangeInHour = Math.max(formular(estTarget, range, runTime, history.result(), lambda = 1), 1)
+            val nextRange = (Math.ceil(nextRangeInHour / unit.toDouble) * unit).toInt
 
             (endTime, target - runTime.toInt) #:: streamRun(start, nextRange, nextTarget, estTarget)
           }
@@ -358,7 +360,7 @@ object ResponseTime extends App with Connection {
           val totalTime = tock.getMillis - tick.getMillis
           val penalty = list.filter(_._2 < 0).map(_._2).map(x => Math.ceil(-x.toDouble / requireTime)).sum
           val sumPenalty = list.filter(_._2 < 0).map(_._2).sum
-          println(s"$requireTime,$minGap,$keyword,${list.size},${penalty},${sumPenalty},${totalTime},${totalTime / list.size}, ${Math.ceil(totalTime.toDouble / requireTime)}")
+          println(s"$requireTime,$unit,$keyword,${list.size},${penalty},${sumPenalty},${totalTime},${totalTime / list.size}, ${Math.ceil(totalTime.toDouble / requireTime)}")
           val (xa, xb) = linearInterpolation(history.result(), history.result().size)
           println(s"interpolation: b = $xb, a = $xa")
         }
@@ -745,8 +747,122 @@ object GetSampleID extends App {
   }
 }
 
-object TestExternalSort extends App {
+object Stats extends App {
 
+  import scala.collection.JavaConverters._
+
+  /**
+    * a0 + a1 * x
+    */
+  case class Coeff(a0: Double, a1: Double)
+
+  def linearFitting(obs: WeightedObservedPoints): Coeff = {
+    val filter: PolynomialCurveFitter = PolynomialCurveFitter.create(1)
+    val ret = filter.fit(obs.toList)
+    Coeff(ret(0), ret(1))
+  }
+
+  def calcVariance(obs: WeightedObservedPoints, coeff: Coeff): Double = {
+    val list = obs.toList.asScala
+    var variance = 0.0
+    for (ob: WeightedObservedPoint <- list) {
+      val y = coeff.a0 + coeff.a1 * ob.getX
+      variance += (y - ob.getY) * (y - ob.getY)
+    }
+    variance / list.size
+  }
+
+  def calcLinearCoeff(x1: Double, y1: Double, x2: Double, y2: Double): Coeff = {
+    val a1 = (y2 - y1) / (x2 - x1)
+    val a0 = y1 - a1 * x1
+    Coeff(a0, a1)
+  }
+
+  def calcThreeAppxLine(variance: Double): Seq[Coeff] = {
+    val stdDev = Math.sqrt(variance)
+    val norm = new NormalDistribution(null, 0, stdDev)
+    println(norm.density(0), norm.density(stdDev), norm.density(stdDev * 2), norm.density(stdDev * 3))
+    val coeff1 = calcLinearCoeff(0, norm.density(0), stdDev, norm.density(stdDev))
+    val coeff2 = calcLinearCoeff(stdDev, norm.density(stdDev), 2 * stdDev, norm.density(2 * stdDev))
+    val coeff3 = calcLinearCoeff(stdDev * 2, norm.density(stdDev * 2), 3 * stdDev, norm.density(3 * stdDev))
+    Seq(coeff1, coeff2, coeff3)
+  }
+
+  def calc0to1(gaussianCoeff: Seq[Coeff], stdDev: Double, C: Double): Seq[Double] = {
+    val o = stdDev
+    val o2 = stdDev * stdDev
+    val o3 = stdDev * o2
+    val C2 = C * C
+    val C3 = C * C2
+
+    val a1 = gaussianCoeff(0).a1
+    val b1 = gaussianCoeff(0).a0
+    val a2 = gaussianCoeff(1).a1
+    val b2 = gaussianCoeff(1).a0
+    val a3 = gaussianCoeff(2).a1
+    val b3 = gaussianCoeff(2).a0
+
+    val c3 = a1 / 3
+    val c2 = a1 * o + (b1 - C * a1) / 2 + a2 * stdDev + a3 * stdDev
+
+    // without alpha
+    val c1 = o2 * (a1 + 9) + o * (b1 - C * (a1 + a2 + a3) + 2 * a2 * 4 * a3) - b1 * C
+
+    val c0 = o3 * (a1 / 3 + a2 + 4 * a3 + 11) + o2 * (1 / 2 * (b1 - C * a1) + 3 / 2 * (b2 - C * a2) + 5 / 2 * (b3 - C * a3)) - o * C * (b1 + b2 + b3) - a1 / 3 * C3 + (b1 - C * a1) / 2 * C2 - b1 * C2
+
+    Seq(c3, c2, c1, c0)
+  }
+
+  def calc0to3(stdDev: Double, C: Double): Seq[Double] = {
+    val norm = new NormalDistribution(null, 0, stdDev)
+    val coeffGauss = calcLinearCoeff(0, norm.density(0), stdDev * 3, norm.density(stdDev * 3))
+    val a = coeffGauss.a1
+    val o = stdDev
+    val o2 = o * o
+    val o3 = o * o2
+
+    val C2 = C * C
+    val C3 = C * C2
+
+    val c3 = -a / 6
+    val c2 = 0.5 * a * C - 1.5 * a * o
+    val c1 = -10.5 * a * o2 + 3 * a * C * o - 0.5 * a * C2
+    val c0 = 4.5 * a * C * o2 - 4.5 * a * o3 + 1/6 * a * C3 - 1.5 * a * o * C2
+    Seq(c3, c2, c1, c0)
+  }
+
+  def withAlpha(alpha: Double, ceffs: Seq[Double]): Seq[Double] = {
+    val c3 = -alpha * ceffs(0)
+    val c2 = -alpha * ceffs(1)
+    val c1 = 1 - alpha * ceffs(2)
+    val c0 = -alpha * ceffs(3)
+    Seq(c3, c2, c1, c0)
+  }
+
+  def deriviation(a: Double, b: Double, c: Double): (Double, Double) = {
+    ((-b + Math.sqrt(b * b - 4 * a * c)) / (2 * a),
+    (-b - Math.sqrt(b * b - 4 * a * c)) / (2 * a))
+  }
+
+  val obs: WeightedObservedPoints = new WeightedObservedPoints()
+  Seq((1, 0.5), (7, 3.8), (2, 1.2)).foreach(x => obs.add(x._1, x._2))
+  val coeff = linearFitting(obs)
+//      val variance = calcVariance(obs, coeff)
+  val variance = 0.5
+  val stdDev = Math.sqrt(variance)
+
+  //  val gaussianCoeff = calcThreeAppxLine(variance)
+
+  //  val cffs1o = calc0to1(gaussianCoeff, stdDev, 2)
+  val ceffs = calc0to3(stdDev, 2)
+  val cffs1oAlpha = withAlpha(1, ceffs)
+  val dy = deriviation(cffs1oAlpha(0) * 3, cffs1oAlpha(1) * 2, cffs1oAlpha(2))
+  println(coeff)
+  println(variance)
+  println(s"c - o:${2 - stdDev}")
+  println(ceffs)
+  println(cffs1oAlpha)
+  println(dy)
 }
 
 object Data {
