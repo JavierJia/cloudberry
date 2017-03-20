@@ -34,7 +34,7 @@ trait Connection {
   val keywords = Seq("zika", "flood", "election", "clinton", "trump", "happy", "")
 
   val gen = new AQLGenerator()
-  val aggrCount = AggregateStatement("*", Count, "count")
+  val aggrCount = AggregateStatement(AllField, Count, NumberField("count"))
   val globalAggr = GlobalAggregateStatement(aggrCount)
 
   implicit val ec: ExecutionContext = ExecutionContext.fromExecutor(Executors.newFixedThreadPool(2))
@@ -485,11 +485,11 @@ object ResponseTime extends App with Connection {
 
 
   def getAQL(start: DateTime, gapHour: Int, keyword: Option[String]): String = {
-    val keywordFilter = keyword.map(k => FilterStatement("text", None, Relation.contains, Seq(k)))
-    val timeFilter = FilterStatement("create_at", None, Relation.inRange,
+    val keywordFilter = keyword.map(k => FilterStatement(TextField("text"), None, Relation.contains, Seq(k)))
+    val timeFilter = FilterStatement(TimeField("create_at"), None, Relation.inRange,
       Seq(TimeField.TimeFormat.print(start),
         TimeField.TimeFormat.print(start.plusHours(gapHour))))
-    val byHour = ByStatement("create_at", Some(Interval(TimeUnit.Minute, 10 * gapHour)), Some("hour"))
+    val byHour = ByStatement(TimeField("create_at"), Some(Interval(TimeUnit.Minute, 10 * gapHour)), Some(NumberField("hour")))
     val groupStatement = GroupStatement(Seq(byHour), Seq(aggrCount))
     //      val query = Query(dataset = "twitter.ds_tweet", filter = Seq(timeFilter), groups = Some(groupStatement))
     val query = Query(dataset = "twitter.ds_tweet", filter = keywordFilter.map(Seq(timeFilter, _)).getOrElse(Seq(timeFilter)), globalAggr = Some(globalAggr))
@@ -497,9 +497,9 @@ object ResponseTime extends App with Connection {
   }
 
   def getSeqTimeAQL(timeSeq: Seq[(DateTime, DateTime)], keyword: String): Seq[String] = {
-    val keywordFilter = FilterStatement("text", None, Relation.contains, Seq(keyword))
+    val keywordFilter = FilterStatement(TextField("text"), None, Relation.contains, Seq(keyword))
     val timeFilters = timeSeq.map { case (start, end) =>
-      FilterStatement("create_at", None, Relation.inRange, Seq(TimeField.TimeFormat.print(start), TimeField.TimeFormat.print(end)))
+      FilterStatement(TimeField("create_at"), None, Relation.inRange, Seq(TimeField.TimeFormat.print(start), TimeField.TimeFormat.print(end)))
     }
     timeFilters.map { f =>
       val query = Query(dataset = "twitter.ds_tweet", filter = Seq(keywordFilter, f), globalAggr = Some(globalAggr))
@@ -508,13 +508,13 @@ object ResponseTime extends App with Connection {
   }
 
   def getCountKeyword(keyword: String): String = {
-    val keywordFilter = FilterStatement("text", None, Relation.contains, Seq(keyword))
+    val keywordFilter = FilterStatement(TextField("text"), None, Relation.contains, Seq(keyword))
     val query = Query(dataset = "twitter.ds_tweet", filter = Seq(keywordFilter), globalAggr = Some(globalAggr))
     gen.generate(query, TwitterDataStore.TwitterSchema)
   }
 
   def getCountTime(start: DateTime, end: DateTime): String = {
-    val timeFilter = FilterStatement("create_at", None, Relation.inRange,
+    val timeFilter = FilterStatement(TimeField("create_at"), None, Relation.inRange,
       Seq(TimeField.TimeFormat.print(start),
         TimeField.TimeFormat.print(end)))
     val query = Query(dataset = "twitter.ds_tweet", filter = Seq(timeFilter), globalAggr = Some(globalAggr))
@@ -524,12 +524,12 @@ object ResponseTime extends App with Connection {
   def getTopK: String = {
     val query = Query(
       dataset = "twitter.ds_tweet",
-      unnest = Seq(UnnestStatement("hashtags", "tag")),
+      unnest = Seq(UnnestStatement(BagField("hashtags", DataType.String), StringField("tag"))),
       groups = Some(
         GroupStatement(
-          Seq(ByStatement(fieldName = "tag", None, None),
-            ByStatement("create_at", Some(Interval(TimeUnit.Day)), Some("day"))),
-          Seq(AggregateStatement("*", Count, "count"))
+          Seq(ByStatement(StringField("tag"), None, None),
+            ByStatement(TimeField("create_at"), Some(Interval(TimeUnit.Day)), Some(NumberField("day")))),
+          Seq(AggregateStatement(AllField, Count, NumberField("count")))
         )))
     gen.generate(query, TwitterDataStore.TwitterSchema)
   }
@@ -539,9 +539,9 @@ object ResponseTime extends App with Connection {
     val query = Query(
       dataset = "twitter.ds_tweet",
       filter = Seq(
-        FilterStatement("create_at", None, Relation.inRange, Seq(TimeFormat.print(start), TimeFormat.print(end)))
+        FilterStatement(TimeField("create_at"), None, Relation.inRange, Seq(TimeFormat.print(start), TimeFormat.print(end)))
       ),
-      select = Some(SelectStatement(orderOn = Seq.empty, limit = 1, offset = 0, fields = Seq("create_at", "id")))
+      select = Some(SelectStatement(orderOn = Seq.empty, order = Seq.empty, limit = 1, offset = 0, fields = Seq(TimeField("create_at"), NumberField("id"))))
     )
     generator.generate(query, TwitterDataStore.TwitterSchema)
   }
@@ -827,7 +827,7 @@ object Stats extends App {
     val c3 = -a / 6
     val c2 = 0.5 * a * C - 1.5 * a * o
     val c1 = -10.5 * a * o2 + 3 * a * C * o - 0.5 * a * C2
-    val c0 = 4.5 * a * C * o2 - 4.5 * a * o3 + 1/6 * a * C3 - 1.5 * a * o * C2
+    val c0 = 4.5 * a * C * o2 - 4.5 * a * o3 + 1 / 6 * a * C3 - 1.5 * a * o * C2
     Seq(c3, c2, c1, c0)
   }
 
@@ -841,13 +841,13 @@ object Stats extends App {
 
   def deriviation(a: Double, b: Double, c: Double): (Double, Double) = {
     ((-b + Math.sqrt(b * b - 4 * a * c)) / (2 * a),
-    (-b - Math.sqrt(b * b - 4 * a * c)) / (2 * a))
+      (-b - Math.sqrt(b * b - 4 * a * c)) / (2 * a))
   }
 
   val obs: WeightedObservedPoints = new WeightedObservedPoints()
   Seq((1, 0.5), (7, 3.8), (2, 1.2)).foreach(x => obs.add(x._1, x._2))
   val coeff = linearFitting(obs)
-//      val variance = calcVariance(obs, coeff)
+  //      val variance = calcVariance(obs, coeff)
   val variance = 0.5
   val stdDev = Math.sqrt(variance)
 
