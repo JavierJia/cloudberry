@@ -245,6 +245,12 @@ object ResponseTime extends App with Connection {
       }
     }
 
+    def linearInterpolateUsingCommon(history: List[QueryStat]): Stats.Coeff = {
+      val obs: WeightedObservedPoints = new WeightedObservedPoints()
+      history.foreach( h => obs.add(h.estSlice, h.actualMS))
+      Stats.linearFitting(obs)
+    }
+
     // a + bx
     def linearInterpolation(history: List[QueryStat], totalNumber: Int): (Double, Double) = {
       val (a2, b2, ab, a, b) = history.takeRight(totalNumber).foldRight((0l, 0l, 0l, 0l, 0l)) {
@@ -330,27 +336,30 @@ object ResponseTime extends App with Connection {
       val terminate = urStartDate
       //        0.9 to 0.1 by -0.1 foreach { discount =>
       //      45 to 2600 by 5 foreach { minGap=>
-      1 to 1 foreach { x =>
+      1 to 1 foreach { alpha =>
         val requireTime = 2000
         for (keyword <- keywords) {
           val history = List.newBuilder[QueryStat]
 
-          def streamRun(endTime: DateTime, range: Int, target: Int, discountTarget: Int): Stream[(DateTime, Int)] = {
+          def streamRun(endTime: DateTime, range: Int, limit: Int, target: Int): Stream[(DateTime, Int)] = {
             val start = endTime.minusHours(range)
             val aql = getAQL(start, range, if (keyword.length > 0) Some(keyword) else None)
             val (runTime, _, count) = multipleTime(0, aql)
 
-            history += QueryStat(discountTarget, range, runTime.toInt)
-            println(s"$start,$range,$keyword,$target,$discountTarget,$runTime,$count")
+            history += QueryStat(target, range, runTime.toInt)
+            println(s"$start,$range,$keyword,$limit,$target,$runTime,$count")
 
-            val diff = if (runTime <= target) target - runTime else -((runTime - target) % requireTime)
-            val nextTarget = requireTime + diff.toInt
+            //            val diff = if (runTime <= limit) limit - runTime else -((runTime - limit) % requireTime)
+            val diff = if (runTime <= limit) limit - runTime else 0
+            val nextLimit = requireTime + diff.toInt
 
-            val estTarget = estimateTarget(nextTarget, history.result())
-            val nextRangeInHour = Math.max(formular(estTarget, range, runTime, history.result(), lambda = 1), 1)
-            val nextRange = (Math.ceil(nextRangeInHour / unit.toDouble) * unit).toInt
+            val estTarget = estimateTarget(nextLimit, alpha, history.result())
+//            val nextRangeInHour = Math.max(formular(estTarget, range, runTime, history.result(), lambda = 1), 1)
+//            val nextRange = (Math.ceil(nextRangeInHour / unit.toDouble) * unit).toInt
+//            val nextRange = nextRangeInHour
+            val nextRange = Math.max(formularUsingComm(estTarget, history.result()), 1)
 
-            (endTime, target - runTime.toInt) #:: streamRun(start, nextRange, nextTarget, estTarget)
+            (endTime, limit - runTime.toInt) #:: streamRun(start, nextRange, nextLimit, estTarget)
           }
 
           val tick = DateTime.now()
@@ -423,14 +432,56 @@ object ResponseTime extends App with Connection {
       }
     }
 
-    def estimateTarget(target: Int, history: List[QueryStat]): Int = {
+    def estimateTarget(limit: Int, alpha: Double, history: List[QueryStat]): Int = {
       // 1. use percent discount
       // 2. use abs difference
       // 3. find the median of the values
-      val values = (Seq(0.0) ++ history.map(s => (s.actualMS.toDouble - s.targetMS) / s.targetMS).filter(_ > 0)).sorted
-      val avg = values.sum / (values.size + Double.MinPositiveValue)
-      val discount = avg
-      Math.ceil(target / (1 + discount)).toInt
+      if (history.size < 3) {
+        return 1
+      }
+      val variance = history.takeRight(history.size - 3).map(h => (h.targetMS - h.actualMS) * (h.targetMS - h.actualMS)).sum.toDouble / history.size
+      if (variance < 0.0000001) return limit
+
+      val stdDev = Math.sqrt(variance)
+      val C = limit.toDouble
+      val ceffs = Stats.calc0to3(stdDev, C)
+      val cffs1oAlpha = Stats.withAlpha(alpha, ceffs)
+      val dy = Stats.deriviation(cffs1oAlpha(0) * 3, cffs1oAlpha(1) * 2, cffs1oAlpha(2))
+
+//      println(s"dy: $dy")
+      if (java.lang.Double.isNaN(dy._2)) {
+        1
+      } else {
+        Math.max(0, Math.min(limit, dy._2)).toInt
+      }
+      //      val values = (Seq(0.0) ++ history.map(s => (s.actualMS.toDouble - s.targetMS) / s.targetMS).filter(_ > 0)).sorted
+      //      val avg = values.sum / (values.size + Double.MinPositiveValue)
+      //      val discount = avg
+      //      Math.ceil(target / (1 + discount)).toInt
+    }
+
+    def formularUsingComm(targetMS: Int, history: List[QueryStat]): Int = {
+      val lastRange = history.last.estSlice
+      val lastTime = history.last.actualMS
+      val lastTarget = history.last.targetMS
+      if (history.size < 3) {
+        val nextGap = lastRange * targetMS / lastTime
+        Math.min(nextGap.toInt, lastRange * 2)
+      } else {
+
+        val obs: WeightedObservedPoints = new WeightedObservedPoints()
+        history.foreach(h => obs.add(h.estSlice, h.actualMS))
+        val rawCoeff = Stats.linearFitting(obs)
+
+        val coeff = if (rawCoeff.a0 < 0 || rawCoeff.a1 < 0){
+          Stats.Coeff(0, history.last.actualMS.toDouble / history.last.estSlice)
+        } else { rawCoeff}
+
+        val noise = lastTime - lastTarget
+        val range = (targetMS - coeff.a0 )/ coeff.a1
+//        println(s"coeff:$coeff, noise: $noise, nextRange: $range")
+        Math.min(range.toInt, lastRange * 2)
+      }
     }
 
     def formular(targetMS: Int, lastGap: Int, lastTime: Long, history: List[QueryStat], lambda: Double): Int = {
@@ -845,21 +896,22 @@ object Stats extends App {
   }
 
   val obs: WeightedObservedPoints = new WeightedObservedPoints()
-  Seq((1, 0.5), (7, 3.8), (2, 1.2)).foreach(x => obs.add(x._1, x._2))
+  Seq((1, 0.5), (7, 4.0), (2, 1.3)).foreach(x => obs.add(x._1, x._2))
   val coeff = linearFitting(obs)
-  //      val variance = calcVariance(obs, coeff)
-  val variance = 0.5
+  println(coeff)
+  val variance = calcVariance(obs, coeff)
+  //  val variance = 0.1
   val stdDev = Math.sqrt(variance)
 
   //  val gaussianCoeff = calcThreeAppxLine(variance)
 
   //  val cffs1o = calc0to1(gaussianCoeff, stdDev, 2)
-  val ceffs = calc0to3(stdDev, 2)
+  val C = 2.8
+  val ceffs = calc0to3(stdDev, C)
   val cffs1oAlpha = withAlpha(1, ceffs)
   val dy = deriviation(cffs1oAlpha(0) * 3, cffs1oAlpha(1) * 2, cffs1oAlpha(2))
-  println(coeff)
   println(variance)
-  println(s"c - o:${2 - stdDev}")
+  println(s"c - o:${C - stdDev}")
   println(ceffs)
   println(cffs1oAlpha)
   println(dy)
