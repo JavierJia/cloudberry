@@ -1117,7 +1117,7 @@ object Stats extends App {
 
     val strSigma = f"$stdDev%1.2f"
     val strAlpha = f"${alpha}%1.5f"
-    val optimalValueZ = 2 * W / (a1 * R * alpha * stdDev) - 1
+    val optimalValueZ = 2 * W / (a1 * R * alpha) - 1
     val optimalRx =
       if (optimalValueZ < -1) {
         0
@@ -1127,7 +1127,10 @@ object Stats extends App {
         val z = Erf.erfInv(optimalValueZ)
         (Math.sqrt(2) * stdDev * z + W - a0) / a1
       }
-    println(s"optimal rx: $optimalRx")
+    val optimizedZ = (a1 * optimalRx + a0 - W) / (Math.sqrt(2) * stdDev)
+    val optimizedProgress = optimalRx/R - alpha * stdDev/(W * Math.sqrt(2)) * (1/Math.sqrt(Math.PI)* Math.exp(-(optimizedZ*optimizedZ)) + optimizedZ* (1 + Erf.erf(optimizedZ)))
+
+    println(s"optimal rx: $optimalRx, z: $optimizedZ, progress: $optimizedProgress")
 
     val strA = s" (${format(a0)} + $a1 *x - $W)/ ${format(Math.sqrt(2) * stdDev)}"
     println(
