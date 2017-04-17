@@ -29,7 +29,8 @@ trait Connection {
   val timeRange: Double = 1572.0
   val unit = new Duration(urStartDate, urEndDate).dividedBy(numberLSMs).getStandardHours
 
-  val keywords = Seq("zika", "flood", "election", "clinton", "trump", "happy", "")
+//  val keywords = Seq("zika", "flood", "election", "clinton", "trump", "happy", "")
+  val keywords = Seq("zika", "flood", "rain", "election", "clinton", "trump", "")
 
   val queryGen = new NgramSQLPPGenerator()
   val aggrCount = AggregateStatement(AllField, Count, NumberField("count"))
@@ -192,13 +193,14 @@ object ResponseTime extends App with Connection {
       val terminate = urStartDate
       //        0.9 to 0.1 by -0.1 foreach { discount =>
       //      45 to 2600 by 5 foreach { minGap=>
-      val fullHistory = List.newBuilder[QueryStat]
       //      2 to 3 foreach { runs =>
       1 to 3 foreach { runs =>
-        Seq(AlgoType.Histogram).foreach { algo =>
-          val alpha = runs
+        Seq(AlgoType.Histogram, AlgoType.NormalGaussian, AlgoType.Baseline).foreach { algo =>
+          val alpha = Math.pow(2,runs-1)
           val requireTime = 2000
-          for (keyword <- Seq("election", "")) {
+          val fullHistory = List.newBuilder[QueryStat]
+
+          for (keyword <- keywords) {
             val history = List.newBuilder[QueryStat]
             val weight = List.newBuilder[Long]
             weight += 1
@@ -258,6 +260,10 @@ object ResponseTime extends App with Connection {
       val lastRange = localHistory.last.estSlice
       val lastTime = localHistory.last.actualMS
       val nextRange = lastRange * limit / lastTime
+
+//      def validateRange(range: Double): Double = Math.max(1, Math.min(nextRange.toInt, lastRange * 2))
+      def validateRange(range: Double): Double = Math.max(1, range)
+
       val closeRange = Math.max(1, Math.min(nextRange.toInt, lastRange * 2))
       if (localHistory.size < 3) {
         (closeRange, limit)
@@ -270,11 +276,11 @@ object ResponseTime extends App with Connection {
           val coeff = trainLinearModel(localHistory)
           algoType match {
             case AlgoType.NormalGaussian =>
-              val range = Math.max(1, Stats.getOptimalRx(timeRange, limit, stdDev, alpha, coeff.a0, coeff.a1))
+              val range = validateRange(Stats.getOptimalRx(timeRange, limit, stdDev, alpha, coeff.a0, coeff.a1))
               (range, range * coeff.a1 + coeff.a0)
             case AlgoType.Histogram =>
               if (globalHistory.size < 20) {
-                val range = Math.max(1, Stats.getOptimalRx(timeRange, limit, stdDev, alpha, coeff.a0, coeff.a1))
+                val range = validateRange(Stats.getOptimalRx(timeRange, limit, stdDev, alpha, coeff.a0, coeff.a1))
                 return (range, range * coeff.a1 + coeff.a0)
               }
               val b = 100
@@ -284,10 +290,10 @@ object ResponseTime extends App with Connection {
               val exp: Seq[Double] = Stats.useHistogramUniformFunction(timeRange, limit, b, coeff.a0, coeff.a1, alpha, probs)
               val maxId = exp.zipWithIndex.maxBy(_._1)._2
               val target = Math.max(0, limit - (maxId + 1) * b / 2)
-              val range = Math.max(1, (target - coeff.a0) / coeff.a1)
+              val range = validateRange((target - coeff.a0) / coeff.a1)
               (range, target)
             case AlgoType.Baseline =>
-              val range = Math.max(1, (limit - coeff.a0) / coeff.a1)
+              val range = validateRange((limit - coeff.a0) / coeff.a1)
               (range, limit)
           }
         }
