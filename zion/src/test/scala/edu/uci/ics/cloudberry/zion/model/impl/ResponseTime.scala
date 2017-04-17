@@ -6,23 +6,18 @@ import java.util.concurrent.Executors
 import akka.actor.ActorSystem
 import akka.stream.ActorMaterializer
 import com.typesafe.config.ConfigFactory
-import edu.uci.ics.cloudberry.zion.experiment.Stats.obs
-import edu.uci.ics.cloudberry.zion.model.datastore.AsterixConn
-import edu.uci.ics.cloudberry.zion.model.impl.{AQLGenerator, TwitterDataStore}
+import edu.uci.ics.cloudberry.zion.model.impl.{AQLGenerator, AsterixSQLPPConn, SQLPPGenerator, TwitterDataStore}
 import edu.uci.ics.cloudberry.zion.model.schema._
 import org.apache.commons.math3.distribution.NormalDistribution
 import org.apache.commons.math3.fitting.{PolynomialCurveFitter, WeightedObservedPoint, WeightedObservedPoints}
 import org.apache.commons.math3.special.Erf
-import org.apache.commons.math3.stat.Frequency
-import org.apache.commons.math3.stat.descriptive.DescriptiveStatistics
 import org.asynchttpclient.AsyncHttpClientConfig
 import org.joda.time.{DateTime, Duration}
 import play.api.libs.ws.WSConfigParser
 import play.api.libs.ws.ahc.{AhcConfigBuilder, AhcWSClient, AhcWSClientConfig}
 import play.api.{Configuration, Environment, Mode}
 
-import scala.collection.mutable
-import scala.collection.mutable.{ArrayBuffer, ListBuffer}
+import scala.collection.mutable.ArrayBuffer
 import scala.concurrent.{Await, ExecutionContext, Future}
 
 trait Connection {
@@ -32,12 +27,14 @@ trait Connection {
   implicit val cmp: Ordering[DateTime] = Ordering.by(_.getMillis)
   val urStartDate = new DateTime(2016, 11, 4, 15, 47)
   val urEndDate = new DateTime(2017, 1, 17, 6, 16)
-  val numberLSMs = 262
+  //{ "$1": "2017-01-21T07:47:36.000Z", "$2": 119945355 }
+  val numberLSMs = 965
+  val timeRange: Double = 1572.0
   val unit = new Duration(urStartDate, urEndDate).dividedBy(numberLSMs).getStandardHours
 
   val keywords = Seq("zika", "flood", "election", "clinton", "trump", "happy", "")
 
-  val gen = new AQLGenerator()
+  val gen = new SQLPPGenerator()
   val aggrCount = AggregateStatement(AllField, Count, NumberField("count"))
   val globalAggr = GlobalAggregateStatement(aggrCount)
 
@@ -45,9 +42,10 @@ trait Connection {
   implicit val system = ActorSystem()
   implicit val mat = ActorMaterializer()
   val wsClient = produceWSClient()
-  val url = "http://uranium.ics.uci.edu:19002/aql"
-  //  val url = "http://localhost:19002/aql"
-  val asterixConn = new AsterixConn(url, wsClient)
+//  val url = "http://uranium.ics.uci.edu:19002/aql"
+  val url = "http://uranium.ics.uci.edu:19002/query/service"
+  val cancelURL = "http://uranium.ics.uci.edu:19002/admin/requests/running"
+  val adbConn = new AsterixSQLPPConn(url, wsClient)
 
   def produceWSClient(): AhcWSClient = {
     val configuration = Configuration.reference ++ Configuration(ConfigFactory.parseString(
@@ -104,7 +102,7 @@ trait Connection {
 
   def timeQuery(aql: String, field: String): (Long, Int) = {
     val start = DateTime.now()
-    val f = asterixConn.postQuery(aql).map { ret =>
+    val f = adbConn.postQuery(aql).map { ret =>
       val duration = new Duration(start, DateTime.now())
       val sum = (ret \\ field).map(_.as[Int]).sum
       //      println("time: " + duration.getMillis + " " + field + ": " + value)
@@ -117,14 +115,14 @@ trait Connection {
     val start = DateTime.now()
     if (inParallel) {
       val f = Future.traverse(aqls) { aql =>
-        asterixConn.postQuery(aql).map { ret => (ret \\ field).map(_.as[Int]).sum }
+        adbConn.postQuery(aql).map { ret => (ret \\ field).map(_.as[Int]).sum }
       }
       val counts = Await.result(f, scala.concurrent.duration.Duration.Inf)
       (DateTime.now.getMillis - start.getMillis, counts)
     } else {
       val counts = Seq.newBuilder[Int]
       aqls.foreach { aql =>
-        val f = asterixConn.postQuery(aql).map(ret => (ret \\ field).map(_.as[Int]).sum)
+        val f = adbConn.postQuery(aql).map(ret => (ret \\ field).map(_.as[Int]).sum)
         val c = Await.result(f, scala.concurrent.duration.Duration.Inf)
         counts += c
       }
@@ -140,7 +138,7 @@ object ResponseTime extends App with Connection {
   //  testID
   //  exit()
 
-  //  warmUp()
+  //    warmUp()
   //  searchBreakdown(gen)
   //  startToEnd()
   testAdaptiveShot()
@@ -149,25 +147,25 @@ object ResponseTime extends App with Connection {
   def warmUp(): Unit = {
     val aql =
       """
-        |for $d in dataset twitter.ds_tweet
-        |where $d.create_at >= datetime('2016-11-01T08:00:00.000Z') and
-        |      $d.create_at <= datetime('2016-11-10T08:00:00.000Z')
-        |group by $g := get-day($d.create_at) with $d
-        |return { "day": $g, "count": count($d)}
+        |select `day` as `day`,coll_count(g) as `count`
+        |from twitter.ds_tweet t
+        |where t.`create_at` >= datetime('2017-01-01T16:23:13.333Z') and t.`create_at` < datetime('2017-01-12T16:23:13.333Z')
+        |group by get_day(t.`create_at`) as `day` group as g;
       """.stripMargin
-    val f = asterixConn.postQuery(aql)
+    val f = adbConn.postQuery(aql)
     Await.result(f, scala.concurrent.duration.Duration.Inf)
   }
 
   def clearCache(): Unit = {
     val aql =
       """
-        |count(for $d in dataset twitter.ds_tweet
-        |where $d.create_at >= datetime('2016-07-01T08:00:00.000Z') and
-        |      $d.create_at <= datetime('2016-08-30T08:00:00.000Z')
-        |return $d)
+        |
+        |select `day` as `day`,coll_count(g) as `count`
+        |from twitter.ds_tweet t
+        |where t.`create_at` >= datetime('2016-01-01T16:23:13.333Z') and t.`create_at` < datetime('2016-01-12T16:23:13.333Z')
+        |group by get_day(t.`create_at`) as `day` group as g;
       """.stripMargin
-    val f = asterixConn.postQuery(aql)
+    val f = adbConn.postQuery(aql)
     Await.result(f, scala.concurrent.duration.Duration.Inf)
   }
 
@@ -185,7 +183,7 @@ object ResponseTime extends App with Connection {
     //    val keywords = Seq("happy", "zika", "uci", "trump", "a")
     //    val keywords = Seq("zika", "pitbull", "goal", "bro", "happy")
     //    keywordWithTime()
-    //    selectivity(keywords)
+    //        selectivity(keywords)
     //      keywordWithContinueTime()
     elasticTimeGap()
     //    minimalTimeGap()
@@ -343,48 +341,57 @@ object ResponseTime extends App with Connection {
       //      45 to 2600 by 5 foreach { minGap=>
       val fullHistory = List.newBuilder[QueryStat]
       //      2 to 3 foreach { runs =>
-      1 to 1 foreach { runs =>
-        val alpha = runs
-        val requireTime = 2000
-        for (keyword <- keywords) {
-          val history = List.newBuilder[QueryStat]
+      1 to 3 foreach { runs =>
+        Seq(AlgoType.Normal).foreach { algo =>
+          val alpha = runs
+          val requireTime = 2000
+          for (keyword <- Seq("trump","")) {
+            val history = List.newBuilder[QueryStat]
+            val weight = List.newBuilder[Long]
+            weight += 1
+            weight += 1
 
-          def streamRun(endTime: DateTime, range: Int, limit: Int, target: Int): Stream[(DateTime, Int)] = {
-            val start = endTime.minusHours(range)
-            val aql = getAQL(start, range, if (keyword.length > 0) Some(keyword) else None)
-            val (runTime, _, count) = multipleTime(0, aql)
+            def streamRun(endTime: DateTime, range: Int, limit: Int, target: Int): Stream[(DateTime, Int)] = {
+              val start = endTime.minusHours(range)
+              val aql = getAQL(start, range, if (keyword.length > 0) Some(keyword) else None)
+              val (runTime, _, count) = multipleTime(0, aql)
 
-            history += QueryStat(target, range, runTime.toInt)
-            fullHistory += QueryStat(target, range, runTime.toInt)
-            println(s"$start,$range,$keyword,$limit,$target,$runTime,$count")
+              history += QueryStat(target, range, runTime.toInt)
+              fullHistory += QueryStat(target, range, runTime.toInt)
+              weight += Math.min(weight.result().takeRight(2).sum, Integer.MAX_VALUE)
+              println(s"$algo,$alpha,$start,$range,$keyword,$limit,$target,$runTime,$count")
 
-            //            val diff = if (runTime <= limit) limit - runTime else -((runTime - limit) % requireTime)
-            val diff = if (runTime <= limit) limit - runTime else 0
-            val nextLimit = requireTime + diff.toInt
+              //            val diff = if (runTime <= limit) limit - runTime else -((runTime - limit) % requireTime)
+              val diff = if (runTime <= limit) limit - runTime else 0
+              val nextLimit = requireTime + diff.toInt
 
-            //            val estTarget = estimateTarget(nextLimit, alpha, history.result())
-            //            val estTarget = estimateTargetUsing3function(nextLimit, alpha, history.result())
-            //            val estTarget = estimateTargetUsingHisto(nextLimit, alpha, if (runs == 1) history.result() else fullHistory.result())
-            //            val estTarget = estimateTargetUsingHisto(nextLimit, alpha, history.result())
-            val estTarget = estimateTargetUseGassianModel(nextLimit, alpha, fullHistory.result())
-            //            val estTarget = estimateTargetUsing3function(nextLimit, alpha, history.result())
-            val nextRangeInHour = Math.max(formularUsingStatsLib(estTarget, history.result()), 1)
-            val nextRange = (Math.ceil(nextRangeInHour / unit.toDouble) * unit).toInt
+              //            val estTarget = estimateTarget(nextLimit, alpha, history.result())
+              //            val estTarget = estimateTargetUsing3function(nextLimit, alpha, history.result())
+              //            val estTarget = estimateTargetUsingHisto(nextLimit, alpha, if (runs == 1) history.result() else fullHistory.result())
+              //            val estTarget = estimateTargetUsingHisto(nextLimit, alpha, history.result())
+              //            val estTarget = estimateTargetUseGassianModel(nextLimit, alpha, fullHistory.result())
+              //            val estTarget = estimateTargetUsing3function(nextLimit, alpha, history.result())
+              //            val nextRangeInHour = Math.max(formularUsingStatsLib(estTarget, history.result()), 1)
+              //val (nextRangeInHour, estTarget) = estimateRangeAndTargetDirectly(nextLimit, alpha, history.result(), weight.result(), fullHistory.result())
+              //val (nextRangeInHour, estTarget) = estimateInGeneral(nextLimit, alpha, history.result(), fullHistory.result(), AlgoType.Normal)
+              val (nextRangeInHour, estTarget) = estimateInGeneral(nextLimit, alpha, history.result(), fullHistory.result(), algo)
+              val nextRange = (Math.ceil(nextRangeInHour / unit.toDouble) * unit).toInt
 
-            (endTime, limit - runTime.toInt) #:: streamRun(start, nextRange, nextLimit, estTarget)
+              (endTime, limit - runTime.toInt) #:: streamRun(start, nextRange, nextLimit, estTarget.toInt)
+            }
+
+            val tick = DateTime.now()
+
+            val list = streamRun(urEndDate, 2, requireTime, requireTime).takeWhile(_._1.getMillis > terminate.getMillis).toList
+            val tock = DateTime.now()
+            val totalTime = tock.getMillis - tick.getMillis
+            val penalty = list.filter(_._2 < 0).map(_._2).map(x => Math.ceil(-x.toDouble / requireTime)).sum
+            val sumPenalty = list.filter(_._2 < 0).map(_._2).sum
+            //          val (xa, xb) = linearInterpolation(history.result(), history.result().size)
+            val histo = history.result()
+            val variance = histo.map(h => (h.targetMS - h.actualMS) * (h.targetMS - h.actualMS)).sum.toDouble / histo.size
+            println(s"$algo,$alpha,$requireTime,$unit,$keyword,${list.size},${penalty},${sumPenalty},${totalTime},${totalTime / list.size}, $variance")
           }
-
-          val tick = DateTime.now()
-
-          val list = streamRun(urEndDate, 2, requireTime, requireTime).takeWhile(_._1.getMillis > terminate.getMillis).toList
-          val tock = DateTime.now()
-          val totalTime = tock.getMillis - tick.getMillis
-          val penalty = list.filter(_._2 < 0).map(_._2).map(x => Math.ceil(-x.toDouble / requireTime)).sum
-          val sumPenalty = list.filter(_._2 < 0).map(_._2).sum
-          //          val (xa, xb) = linearInterpolation(history.result(), history.result().size)
-          val histo = history.result()
-          val variance = histo.map(h => (h.targetMS - h.actualMS) * (h.targetMS - h.actualMS)).sum.toDouble / histo.size
-          println(s"$requireTime,$unit,$keyword,${list.size},${penalty},${sumPenalty},${totalTime},${totalTime / list.size}, $variance")
         }
       }
     }
@@ -478,86 +485,102 @@ object ResponseTime extends App with Connection {
       history.filter(h => h.targetMS < h.actualMS).map(h => (h.targetMS - h.actualMS) * (h.targetMS - h.actualMS)).sum.toDouble / history.size
     }
 
-    def estimateTargetUsingHisto(limit: Int, alpha: Double, a0: Double, history: List[QueryStat]): Int = {
-      if (history.size < 10) {
-        estimateTargetUsing3function(limit, alpha, history)
-      } else {
-        val b = 100
-        val histo = new Stats.Histogram(b)
-        history.foreach(h => histo += h.actualMS - h.targetMS)
+    object AlgoType extends Enumeration {
+      type Type = Value
+      val Normal = Value(1)
+      val Histogram = Value(2)
+      val Baseline = Value(3)
+    }
 
-        val probs: Seq[Double] = (0 to (limit / b - 1)).map(histo.prob) ++ Seq(histo.cumProb(limit / b))
-        val exp: Seq[Double] = Stats.useHistogramUniformFunction(limit, b, a0, alpha, probs)
-        //        println(s"probs: $probs")
-        //        println(s"expectation: $exp")
-        val maxId = exp.zipWithIndex.maxBy(_._1)._2
-        val target = limit - (maxId + 1) * b / 2
-        val useModel = estimateTargetUsing3function(limit, alpha, history)
-        println(s"using model: $useModel, using target:$target")
-        target
+    def estimateInGeneral(limit: Int, alpha: Double, localHistory: List[QueryStat], globalHistory: List[QueryStat], algoType: AlgoType.Type): (Double, Double) = {
+      val lastRange = localHistory.last.estSlice
+      val lastTime = localHistory.last.actualMS
+      val nextRange = lastRange * limit / lastTime
+      val closeRange = Math.max(1, Math.min(nextRange.toInt, lastRange * 2))
+      if (localHistory.size < 3) {
+        (closeRange, limit)
+      } else {
+        val variance = calcVariance(globalHistory)
+        if (variance < 0.0000001) {
+          (closeRange, limit)
+        } else {
+          val stdDev = Math.sqrt(variance)
+          val coeff = trainLinearModel(localHistory)
+          algoType match {
+            case AlgoType.Normal =>
+              val range = Math.max(1, Stats.getOptimalRx(timeRange, limit, stdDev, alpha, coeff.a0, coeff.a1))
+              (range, range * coeff.a1 + coeff.a0)
+            case AlgoType.Histogram =>
+              if (globalHistory.size < 20) {
+                val range = Math.max(1, Stats.getOptimalRx(timeRange, limit, stdDev, alpha, coeff.a0, coeff.a1))
+                return (range, range * coeff.a1 + coeff.a0)
+              }
+              val b = 100
+              val histo = new Stats.Histogram(b)
+              globalHistory.foreach(h => histo += h.actualMS - h.targetMS)
+              val probs: Seq[Double] = (0 to (limit / b - 1)).map(histo.prob) ++ Seq(histo.cumProb(limit / b))
+              val exp: Seq[Double] = Stats.useHistogramUniformFunction(timeRange, limit, b, coeff.a0, coeff.a1, alpha, probs)
+              val maxId = exp.zipWithIndex.maxBy(_._1)._2
+              val target = Math.max(0, limit - (maxId + 1) * b / 2)
+              val range = Math.max(1, (target - coeff.a0) / coeff.a1)
+              (range, target)
+            case AlgoType.Baseline =>
+              val range = Math.max(1, (limit - coeff.a0) / coeff.a1)
+              (range, limit)
+          }
+        }
       }
     }
 
-    def estimateTargetUsing3function(limit: Int, alpha: Double, history: List[QueryStat]): Int = {
-      if (history.size < 3) {
-        return 1
+    def estimateRangeAndTargetDirectly(limit: Int, alpha: Double, localHistory: List[QueryStat],
+                                       weight: List[Long], globalHistory: List[QueryStat]): (Double, Double) = {
+      val lastRange = localHistory.last.estSlice
+      val lastTime = localHistory.last.actualMS
+      val nextRange = lastRange * limit / lastTime
+      val closeRange = Math.max(1, Math.min(nextRange.toInt, lastRange * 2))
+      if (localHistory.size < 3) {
+        (closeRange, limit)
+      } else {
+        val variance = calcVariance(globalHistory)
+        if (variance < 0.0000001) {
+          (closeRange, limit)
+        } else {
+          val stdDev = Math.sqrt(variance)
+          // val coeff = trainLinearModel(localHistory, weight)
+          val coeff = trainLinearModel(localHistory)
+          val range = Math.max(1, Stats.getOptimalRx(timeRange, limit, stdDev, alpha, coeff.a0, coeff.a1))
+          (range, range * coeff.a1 + coeff.a0)
+        }
       }
-      val variance = calcVariance(history)
-      if (variance < 0.0000001) return limit
+    }
 
-      val stdDev = Math.sqrt(variance)
-      val C = limit.toDouble
-      val c1 = Stats.constantP1(alpha, C, stdDev)
-      val c2 = Stats.constantP2(alpha, C, stdDev)
-      val c3 = Stats.constantP3(alpha, C, stdDev)
-      val c4 = Stats.constantP4(alpha, C, stdDev)
+    def trainLinearModel(history: List[QueryStat]): Stats.Coeff = {
+      val obs: WeightedObservedPoints = new WeightedObservedPoints()
+      history.foreach(h => obs.add(h.estSlice, h.actualMS))
+      //      history.zip(weight).foreach{ case (h,w) =>
+      //        obs.add(0.5/sumWeight, h.estSlice, h.actualMS)
+      //      }
 
-      def fx(c: Stats.Coeff3, x: Double): Double = {
-        c.a2 * x * x + c.a1 * x + c.a0
+      //      if (history.size <= 10) {
+      //        history.foreach { h =>
+      //          obs.add(0.5, history.last.estSlice, history.last.actualMS)
+      //        }
+      //      } else {
+      //        val sumWeight = history.size - 10
+      //        history.take(history.size - 10).foreach { h =>
+      //          obs.add(0.1 / sumWeight, h.estSlice, h.actualMS)
+      //        }
+      //        obs.add(0.45, history(history.size-2).estSlice, history(history.size-2).actualMS)
+      //        obs.add(0.45, history.last.estSlice, history.last.actualMS)
+      //      }
+
+      val rawCoeff = Stats.linearFitting(obs)
+
+      if (rawCoeff.a0 <= Double.MinPositiveValue || rawCoeff.a1 <= Double.MinPositiveValue) {
+        Stats.Coeff(Double.MinPositiveValue, history.last.actualMS.toDouble / history.last.estSlice)
+      } else {
+        rawCoeff
       }
-
-      def peak(p: Double, c: Stats.Coeff3, low: Double, high: Double): (Double, Double) = {
-        val vx = 1 / (p * alpha) + C - 3 * stdDev
-        val vy = if (vx < high && vx > low) fx(c, vx) else Double.MinValue
-        (vx, vy)
-      }
-
-      val v1T = fx(c1, C)
-      val v1To = fx(c1, C - stdDev)
-      val (vX1, v1X) = peak(Data.P1, c1, C - stdDev, C)
-
-      val v2To = fx(c2, C - stdDev)
-      val v2T2o = fx(c2, C - 2 * stdDev)
-      val (vX2, v2X) = peak(Data.P2, c2, C - 2 * stdDev, C - stdDev)
-
-      val v3T2o = fx(c3, C - 2 * stdDev)
-      val v3T3o = c4 * (C - 3 * stdDev)
-      val (vX3, v3X) = peak(Data.P3, c3, C - 3 * stdDev, C - 2 * stdDev)
-      val seq = Seq(v1T, v1To, v1X, v2To, v2T2o, v2X, v3T2o, v3T3o, v3X)
-      val id = seq.zipWithIndex.maxBy(_._1)._2
-
-      val x = id match {
-        case 0 =>
-          C.toInt
-        case 1 =>
-          (C - stdDev).toInt
-        case 2 =>
-          vX1.toInt
-        case 3 =>
-          (C - stdDev).toInt
-        case 4 =>
-          (C - 2 * stdDev).toInt
-        case 5 =>
-          vX2.toInt
-        case 6 =>
-          (C - 2 * stdDev).toInt
-        case 7 =>
-          (C - 3 * stdDev).toInt
-        case 8 =>
-          vX3.toInt
-      }
-
-      Math.max(0, x)
     }
 
     def naiveFormular(targetMS: Int, history: List[QueryStat]): Int = {
@@ -775,7 +798,7 @@ object ResponseTime extends App with Connection {
        """.stripMargin
 
     def getIDs(aql: String): Seq[Long] = {
-      val f = asterixConn.postQuery(aql).map { ret =>
+      val f = adbConn.postQuery(aql).map { ret =>
         ret.as[Seq[Long]]
       }
       Await.result(f, scala.concurrent.duration.Duration.Inf)
@@ -913,7 +936,9 @@ object Stats extends App {
   /**
     * a0 + a1 * x
     */
-  case class Coeff(a0: Double, a1: Double)
+  case class Coeff(a0: Double, a1: Double) {
+    override def toString: String = s"a1=$a1, a0=$a0"
+  }
 
   case class Coeff3(a2: Double, a1: Double, a0: Double) {
     override def toString: String =
@@ -954,31 +979,6 @@ object Stats extends App {
     val coeff2 = calcLinearCoeff(stdDev, norm.density(stdDev), 2 * stdDev, norm.density(2 * stdDev))
     val coeff3 = calcLinearCoeff(stdDev * 2, norm.density(stdDev * 2), 3 * stdDev, norm.density(3 * stdDev))
     Seq(coeff1, coeff2, coeff3)
-  }
-
-  def calc0to1(gaussianCoeff: Seq[Coeff], stdDev: Double, C: Double): Seq[Double] = {
-    val o = stdDev
-    val o2 = stdDev * stdDev
-    val o3 = stdDev * o2
-    val C2 = C * C
-    val C3 = C * C2
-
-    val a1 = gaussianCoeff(0).a1
-    val b1 = gaussianCoeff(0).a0
-    val a2 = gaussianCoeff(1).a1
-    val b2 = gaussianCoeff(1).a0
-    val a3 = gaussianCoeff(2).a1
-    val b3 = gaussianCoeff(2).a0
-
-    val c3 = a1 / 3
-    val c2 = a1 * o + (b1 - C * a1) / 2 + a2 * stdDev + a3 * stdDev
-
-    // without alpha
-    val c1 = o2 * (a1 + 9) + o * (b1 - C * (a1 + a2 + a3) + 2 * a2 * 4 * a3) - b1 * C
-
-    val c0 = o3 * (a1 / 3 + a2 + 4 * a3 + 11) + o2 * (1 / 2 * (b1 - C * a1) + 3 / 2 * (b2 - C * a2) + 5 / 2 * (b3 - C * a3)) - o * C * (b1 + b2 + b3) - a1 / 3 * C3 + (b1 - C * a1) / 2 * C2 - b1 * C2
-
-    Seq(c3, c2, c1, c0)
   }
 
   def calcBeta(stdDev: Double): Double = {
@@ -1073,62 +1073,32 @@ object Stats extends App {
   }
 
 
-  //  val gaussianCoeff = calcThreeAppxLine(variance)
-
-  //  val cffs1o = calc0to1(gaussianCoeff, stdDev, 2)
-
-  def useOneLinearFunction(W: Double, stdDev: Double, alpha: Double, a0: Double, a1: Double): Unit = {
+  def getOptimalRx(range: Double, W: Double, stdDev: Double, alpha: Double, a0: Double, a1: Double): Double = {
+    val R = range
     val Rw = (W - a0) / a1
-    val R = 100
-    val b1 = calcBeta(stdDev)
-    val penaltyCoeffient = alpha * b1 / (6 * W)
-    val penaltyInnerConstant = a0 + 3 * stdDev - W
-
-    //    val cffs1oAlpha = withAlpha(alpha, ceffs)
-    //    val cffs1oAlpha = withRxAlpha(alpha, a0, W, ceffs)
-    //    val dy = deriviation(cffs1oAlpha(0) * 3, cffs1oAlpha(1) * 2, cffs1oAlpha(2))
-
-    val strSigma = f"$stdDev%1.2f"
-    val strAlpha = f"${alpha}%1.5f"
-
-    println(s"Rw:${Rw}, stdDev:$stdDev")
-    println(s"x/$R + $penaltyCoeffient($a1 * x+$penaltyInnerConstant)^3")
-    println(
-      s"""
-         |set key left box
-         |set autoscale
-         |set samples 800
-         |set terminal postscript eps enhanced size 3in,3in
-         |
-         |x3(x) = x*x*x
-         |y3(r, pOut, a1, pIn, x) = x/r + pOut* x3(a1*x + pIn)
-         |plot [0:$Rw] ($a1*x + $a0) < ${W - 3 * stdDev} ? x/$R : y3($R, $penaltyCoeffient, $a1, $penaltyInnerConstant, x) \\
-         |      ti '{/Symbol a}=$strAlpha, {/Symbol o}=$strSigma'
-         |""".stripMargin
-    )
-
+    val optimalValueZ = 2 * W / (a1 * R * alpha) - 1
+    if (optimalValueZ < -1) {
+      0
+    } else if (optimalValueZ > 0) {
+      Rw
+    } else {
+      val z = Erf.erfInv(optimalValueZ)
+      Math.min(Rw, Math.max(0, (Math.sqrt(2) * stdDev * z + W - a0) / a1))
+    }
   }
 
   def useRealGaussian(W: Double, stdDev: Double, alpha: Double, a0: Double, a1: Double): Unit = {
-    val R = 100.0
-    val Rw = (W - a0) / a1
 
     def format(n: Double): String = "%.5f".format(n)
 
+    val R = 100.0
+    val Rw = (W - a0) / a1
     val strSigma = f"$stdDev%1.2f"
     val strAlpha = f"${alpha}%1.5f"
-    val optimalValueZ = 2 * W / (a1 * R * alpha) - 1
-    val optimalRx =
-      if (optimalValueZ < -1) {
-        0
-      } else if (optimalValueZ > 0) {
-        Rw
-      } else {
-        val z = Erf.erfInv(optimalValueZ)
-        (Math.sqrt(2) * stdDev * z + W - a0) / a1
-      }
+    val optimalRx = getOptimalRx(R, W, stdDev, alpha, a0, a1)
+
     val optimizedZ = (a1 * optimalRx + a0 - W) / (Math.sqrt(2) * stdDev)
-    val optimizedProgress = optimalRx/R - alpha * stdDev/(W * Math.sqrt(2)) * (1/Math.sqrt(Math.PI)* Math.exp(-(optimizedZ*optimizedZ)) + optimizedZ* (1 + Erf.erf(optimizedZ)))
+    val optimizedProgress = optimalRx / R - alpha * stdDev / (W * Math.sqrt(2)) * (1 / Math.sqrt(Math.PI) * Math.exp(-(optimizedZ * optimizedZ)) + optimizedZ * (1 + Erf.erf(optimizedZ)))
 
     println(s"optimal rx: $optimalRx, z: $optimizedZ, progress: $optimizedProgress")
 
@@ -1142,13 +1112,13 @@ object Stats extends App {
          |set samples 800
          |set terminal postscript eps enhanced size 3in,3in
          |
-         |set arrow from $optimalRx,-1 to $optimalRx,1 nohead lc rgb 'red';
          |x2(x) = x*x
          |a(W, o, a1, a0,x) = (a1*x + a0 - W) / (sqrt(2)*o)
          |E(R, alpha, W, o, a1, a0, x) = x/R - alpha * o/(W * sqrt(2)) * ( 1/sqrt(3.14)* exp(-x2(a(W,o,a1,a0,x))) + a(W,o,a1,a0,x) * (1 + erf(a(W,o,a1,a0,x))))
          |
+         |set arrow from $optimalRx,-1 to $optimalRx,1 nohead;
          |plot [0:$Rw] E($R, $alpha,$W, $stdDev, $a1, $a0, x) \\
-         |      ti '{/Symbol a}=$strAlpha, {/Symbol o}=$strSigma'
+         |      ti '{/Symbol a}=$strAlpha, {/Symbol o}=$strSigma',
        """.stripMargin)
 
 
@@ -1215,51 +1185,16 @@ object Stats extends App {
     }
   }
 
-  def useHistogramUniformFunction(W: Double, b: Double, a0: Double, alpha: Double, probs: Seq[Double]): Seq[Double] = {
+  def useHistogramUniformFunction(range: Double, W: Double, b: Double, a0: Double, a1: Double, alpha: Double, probs: Seq[Double]): Seq[Double] = {
     val b2 = b * b
     val seqIntegral: Seq[Double] = 1 to probs.size map (i => 0.5 * b2 + (i - 1) * b2)
     //    println(seqIntegral)
 
     def value(j: Int) = probs.slice(j, probs.size).zip(seqIntegral).map { case (p: Double, v: Double) => p * v }.sum
 
-    0 to (probs.size - 1) foreach (j => println(s"gain:${(W - j * b - a0) / (W - a0)}, penalty:alpha * ${value(j)} = ${alpha / W * value(j)}"))
+//        0 to (probs.size - 1) foreach (j => println(s"gain:${(W - j * b - a0) / (a1 * range)}, penalty:alpha * ${value(j)/W} = ${alpha / W * value(j)}"))
 
-    0 to (probs.size - 1) map (j => (W - j * b - a0) / (W - a0) - (alpha / W) * value(j))
-  }
-
-  def use3UniformFunction(C: Double, stdDev: Double, alpha: Double): Unit = {
-    val end = 3
-    val c1 = constantP1(alpha, C, stdDev)
-    val c2 = constantP2(alpha, C, stdDev)
-    val c3 = constantP3(alpha, C, stdDev)
-    val c4 = constantP4(alpha, C, stdDev)
-
-    println(C - stdDev, C)
-    println(c1)
-    println(C - 2 * stdDev, C - stdDev)
-    println(c2)
-    println(C - 3 * stdDev, C - 2 * stdDev)
-    println(c3)
-    println("dy1=" + constantDev(alpha, Data.P1, stdDev, C))
-    println(" dy2=" + constantDev(alpha, Data.P2, stdDev, C))
-    println(" dy3=" + constantDev(alpha, Data.P3, stdDev, C))
-
-    val strSigma = f"$stdDev%1.2f"
-    val strAlpha = f"${alpha}%1.1f"
-
-    println(
-      s"""
-         |set key left box
-         |set autoscale
-         |set samples 800
-         |set terminal postscript eps enhanced size 3in,3in
-         |
-         |y2(a2,a1,a0, x) = a2 * (x**2) + a1 * x + a0
-         |plot [${C - 3 * stdDev}:$C] x > $C ? 0 : ( ${C - stdDev} < x && x <= $C ? y2(${c1.a2}, ${c1.a1}, ${c1.a0}, x) \\
-         |             :(${C - 2 * stdDev} < x && x <= ${C - stdDev} ? y2(${c2.a2}, ${c2.a1}, ${c2.a0}, x) \\
-         |                :(${C - 3 * stdDev} < x && x <= ${C - 2 * stdDev} ? y2(${c3.a2}, ${c3.a1}, ${c3.a0}, x) : $c4*x))) \\
-         |                ti '{/Symbol a}=$strAlpha, {/Symbol o}=$strSigma'
-       """.stripMargin)
+    0 to (probs.size - 1) map (j => (W - j * b - a0) / (a1 * range) - (alpha/b / W) * value(j))
   }
 
   val obs: WeightedObservedPoints = new WeightedObservedPoints()
@@ -1268,18 +1203,19 @@ object Stats extends App {
   println(coeff)
   val variance = calcVariance(obs, coeff)
   //    val variance = 0.25
-    val stdDev = Math.sqrt(variance)
-//  val stdDev = 0.5
+  //  val stdDev = Math.sqrt(variance)
+  val stdDev = 0.5
   println(variance, stdDev)
 
-  val C = 2.2
-  val alpha = 1
-  //  useNormalizedLinearFunction(C, stdDev, alpha)
-  useOneLinearFunction(C, stdDev, alpha, coeff.a0, coeff.a1)
-  useRealGaussian(C, stdDev, alpha, coeff.a0, coeff.a1)
-  //  use3UniformFunction(C, stdDev, alpha)
-  //    val px = useHistogramUniformFunction(2, 0.2, 0.2, alpha, Seq(0.26, 0.35, 0.24, 0.01))
-  //    println(px)
+  val C = 2
+  Seq(1).foreach { alpha =>
+    //  useNormalizedLinearFunction(C, stdDev, alpha)
+    //  useOneLinearFunction(C, stdDev, alpha, coeff.a0, coeff.a1)
+//    useRealGaussian(C, stdDev, alpha, coeff.a0, coeff.a1)
+    //  use3UniformFunction(C, stdDev, alpha)
+        val px = useHistogramUniformFunction(100, 2, 0.2, 0.3, 0.5, alpha, Seq(0.35, 0.26, 0.24, 0.01))
+        println(px)
+  }
 }
 
 object Data {
@@ -1381,6 +1317,6 @@ object TestHistorgram extends App {
   val n = (W / b).toInt
   val probs = ((0 to (n - 1)).map(histo.prob) ++ Seq(histo.cumProb(n)))
   println(probs)
-  val exp = Stats.useHistogramUniformFunction(W, b, a0, alpha, probs)
-  println(exp)
+  //  val exp = Stats.useHistogramUniformFunction(W, b, a0, alpha, probs)
+  //  println(exp)
 }

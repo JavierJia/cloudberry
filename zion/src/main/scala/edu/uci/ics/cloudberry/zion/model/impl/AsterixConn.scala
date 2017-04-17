@@ -17,7 +17,7 @@ class AsterixAQLConn(url: String, wSClient: WSClient)(implicit ec: ExecutionCont
   def postQuery(aql: String): Future[JsValue] = {
     postWithCheckingStatus(aql, (ws: WSResponse) => ws.json, (ws: WSResponse) => defaultQueryResponse)
   }
-  
+
   def postControl(aql: String): Future[Boolean] = {
     postWithCheckingStatus(aql, (ws: WSResponse) => true, (ws: WSResponse) => false)
   }
@@ -55,18 +55,18 @@ class AsterixSQLPPConn(url: String, wSClient: WSClient)(implicit ec: ExecutionCo
 
   override def defaultQueryResponse: JsValue = defaultEmptyResponse
 
-  def postQuery(query: String): Future[JsValue] = {
+  def postQuery(query: String, contextID: Option[Int] = None): Future[JsValue] = {
     postWithCheckingStatus(query, (ws: WSResponse) => {
       ws.json.asInstanceOf[JsObject].value("results")
-    }, (ws: WSResponse) => defaultQueryResponse)
+    }, (ws: WSResponse) => defaultQueryResponse, contextID)
   }
 
   def postControl(query: String): Future[Boolean] = {
     postWithCheckingStatus(query, (ws: WSResponse) => true, (ws: WSResponse) => false)
   }
 
-  protected def postWithCheckingStatus[T](query: String, succeedHandler: WSResponse => T, failureHandler: WSResponse => T): Future[T] = {
-    post(query).map { wsResponse =>
+  protected def postWithCheckingStatus[T](query: String, succeedHandler: WSResponse => T, failureHandler: WSResponse => T, contextID: Option[Int] = None): Future[T] = {
+    post(query, contextID).map { wsResponse =>
       if (wsResponse.json.asInstanceOf[JsObject].value.get("status") == Some(JsString("success"))) {
         succeedHandler(wsResponse)
       }
@@ -77,11 +77,15 @@ class AsterixSQLPPConn(url: String, wSClient: WSClient)(implicit ec: ExecutionCo
     }
   }
 
-  def post(query: String): Future[WSResponse] = {
+  def post(query: String, contextID: Option[Int] = None): Future[WSResponse] = {
     log.debug("Query:" + query)
-    val f = wSClient.url(url).withRequestTimeout(Duration.Inf).post(params(query))
+    val f = wSClient.url(url).withRequestTimeout(Duration.Inf).post(params(query, contextID))
     f.onFailure(wsFailureHandler(query))
     f
+  }
+
+  def cancel(url: String, contextID: Int): Future[WSResponse] = {
+    wSClient.url(url).withQueryString("client_context_id" -> contextID.toString).delete()
   }
 
   protected def wsFailureHandler(query: String): PartialFunction[Throwable, Unit] = {
@@ -89,9 +93,13 @@ class AsterixSQLPPConn(url: String, wSClient: WSClient)(implicit ec: ExecutionCo
       throw e
   }
 
-  protected def params(query: String): Map[String, Seq[String]] = {
-    Map("statement" -> Seq(query), "mode" -> Seq("synchronous"), "include-results" -> Seq("true"))
+  protected def params(query: String, contextID: Option[Int]): Map[String, Seq[String]] = {
+    Map("client_context_id" -> Seq(contextID.getOrElse(0).toString), "statement" -> Seq(query), "mode" -> Seq("synchronous"), "include-results" -> Seq("true"))
   }
+
+  override def postQuery(statement: String): Future[JsValue] = postQuery(statement, None)
+
+  override def post(statement: String): Future[WSResponse] = post(statement, None)
 }
 
 object AsterixSQLPPConn {
