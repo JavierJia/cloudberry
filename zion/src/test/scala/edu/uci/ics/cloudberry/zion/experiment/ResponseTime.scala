@@ -675,7 +675,7 @@ object ResponseTime extends App with Connection {
     val groupStatement = GroupStatement(Seq(byHour), Seq(aggrCount))
     //      val query = Query(dataset = "twitter.ds_tweet", filter = Seq(timeFilter), groups = Some(groupStatement))
     val query = Query(dataset = "twitter.ds_tweet", filter = keywordFilter.map(Seq(timeFilter, _)).getOrElse(Seq(timeFilter)), globalAggr = Some(globalAggr))
-    gen.generate(query, TwitterDataStore.TwitterSchema)
+    gen.generate(query, Map(TwitterDataStore.DatasetName -> TwitterDataStore.TwitterSchema))
   }
 
   def getSeqTimeAQL(timeSeq: Seq[(DateTime, DateTime)], keyword: String): Seq[String] = {
@@ -685,14 +685,14 @@ object ResponseTime extends App with Connection {
     }
     timeFilters.map { f =>
       val query = Query(dataset = "twitter.ds_tweet", filter = Seq(keywordFilter, f), globalAggr = Some(globalAggr))
-      gen.generate(query, TwitterDataStore.TwitterSchema)
+      gen.generate(query,Map(TwitterDataStore.DatasetName -> TwitterDataStore.TwitterSchema))
     }
   }
 
   def getCountKeyword(keyword: String): String = {
     val keywordFilter = FilterStatement(TextField("text"), None, Relation.contains, Seq(keyword))
     val query = Query(dataset = "twitter.ds_tweet", filter = Seq(keywordFilter), globalAggr = Some(globalAggr))
-    gen.generate(query, TwitterDataStore.TwitterSchema)
+    gen.generate(query, Map(TwitterDataStore.DatasetName -> TwitterDataStore.TwitterSchema))
   }
 
   def getCountTime(start: DateTime, end: DateTime): String = {
@@ -700,7 +700,7 @@ object ResponseTime extends App with Connection {
       Seq(TimeField.TimeFormat.print(start),
         TimeField.TimeFormat.print(end)))
     val query = Query(dataset = "twitter.ds_tweet", filter = Seq(timeFilter), globalAggr = Some(globalAggr))
-    gen.generate(query, TwitterDataStore.TwitterSchema)
+    gen.generate(query, Map(TwitterDataStore.DatasetName -> TwitterDataStore.TwitterSchema))
   }
 
   def getTopK: String = {
@@ -713,7 +713,7 @@ object ResponseTime extends App with Connection {
             ByStatement(TimeField("create_at"), Some(Interval(TimeUnit.Day)), Some(NumberField("day")))),
           Seq(AggregateStatement(AllField, Count, NumberField("count")))
         )))
-    gen.generate(query, TwitterDataStore.TwitterSchema)
+    gen.generate(query, Map(TwitterDataStore.DatasetName -> TwitterDataStore.TwitterSchema))
   }
 
   def getSamplePerDay(generator: AQLGenerator, start: DateTime, end: DateTime): String = {
