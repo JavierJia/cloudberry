@@ -25,7 +25,8 @@ trait Connection {
   val urStartDate = new DateTime(2016, 11, 4, 15, 47)
   val urEndDate = new DateTime(2017, 1, 17, 6, 16)
   //{ "$1": "2017-01-21T07:47:36.000Z", "$2": 119945355 }
-  val numberLSMs = 965
+//  val numberLSMs = 965
+  val numberLSMs = 267
   val timeRange: Double = 1572.0
   val unit = new Duration(urStartDate, urEndDate).dividedBy(numberLSMs).getStandardHours
 
@@ -220,10 +221,9 @@ object ResponseTime extends App with Connection {
               val diff = if (runTime <= limit) limit - runTime else 0
               val nextLimit = requireTime + diff.toInt
 
-              val (nextRangeInHour, estTarget) = estimateInGeneral(nextLimit, alpha, history.result(), fullHistory.result(), algo)
-              val nextRange = (Math.ceil(nextRangeInHour / unit.toDouble) * unit).toInt
+              val (nextRange, estTarget) = estimateInGeneral(nextLimit, alpha, history.result(), fullHistory.result(), algo)
 
-              (endTime, limit - runTime.toInt) #:: streamRun(start, nextRange, nextLimit, estTarget.toInt)
+              (endTime, limit - runTime.toInt) #:: streamRun(start, nextRange.toInt, nextLimit, estTarget.toInt)
             }
 
             val tick = DateTime.now()
@@ -238,6 +238,7 @@ object ResponseTime extends App with Connection {
             val variance = histo.map(h => (h.targetMS - h.actualMS) * (h.targetMS - h.actualMS)).sum.toDouble / histo.size
             println("algorithm,alpha,requireTime,unit,keyword,numQuery,numPenalty,sumPenalty,totalTime,aveTime, $variance")
             println(s"$algo,$alpha,$requireTime,$unit,$keyword,${list.size},${penalty},${sumPenalty/1000.0},${totalTime/1000.0},${totalTime/list.size/1000.0}, $variance")
+            println()
           }
         }
       }
@@ -261,8 +262,14 @@ object ResponseTime extends App with Connection {
       val lastTime = localHistory.last.actualMS
       val nextRange = lastRange * limit / lastTime
 
-//      def validateRange(range: Double): Double = Math.max(1, Math.min(nextRange.toInt, lastRange * 2))
-      def validateRange(range: Double): Double = Math.max(1, range)
+      def validateRange(range: Double): Double = {
+        if (1 << localHistory.size < unit) {
+          Math.max(1, Math.min(range.toInt, lastRange * 2))
+        } else {
+          Math.max(unit, Math.min(range.toInt, lastRange * 2))
+        }
+      }
+//      def validateRange(range: Double): Double = Math.max(1, range)
 
       val closeRange = Math.max(1, Math.min(nextRange.toInt, lastRange * 2))
       if (localHistory.size < 3) {
@@ -277,6 +284,7 @@ object ResponseTime extends App with Connection {
           algoType match {
             case AlgoType.NormalGaussian =>
               val range = validateRange(Stats.getOptimalRx(timeRange, limit, stdDev, alpha, coeff.a0, coeff.a1))
+//              println(s"range=$range,limit=$limit, o=$stdDev, a=$alpha, a0=${coeff.a0}, a1=${coeff.a1}")
               (range, range * coeff.a1 + coeff.a0)
             case AlgoType.Histogram =>
               if (globalHistory.size < 20) {
