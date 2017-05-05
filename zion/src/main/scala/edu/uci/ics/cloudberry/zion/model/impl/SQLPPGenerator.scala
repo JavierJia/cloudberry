@@ -48,6 +48,8 @@ class SQLPPGenerator extends AsterixQueryGenerator {
 
   protected val sourceVar: String = "t"
 
+  protected val appendVar: String = "ta"
+
   protected val unnestVar: String = "unnest"
 
   protected val lookupVar: String = "l"
@@ -108,6 +110,11 @@ class SQLPPGenerator extends AsterixQueryGenerator {
     return queryBuilder.toString()
   }
 
+  protected def parseDrop(query: DropView, schemaMap: Map[String, Schema]): String = {
+    s"drop dataset ${query.dataset} if exists"
+  }
+
+
   def parseQuery(query: Query, schemaMap: Map[String, Schema]): String = {
     val queryBuilder = new mutable.StringBuilder()
 
@@ -115,7 +122,9 @@ class SQLPPGenerator extends AsterixQueryGenerator {
     val fromStr = s"from ${query.dataset} $sourceVar".trim
     queryBuilder.append(fromStr)
 
-    val resultAfterLookup = parseLookup(query.lookup, exprMap, queryBuilder, false)
+    val resultAfterAppend = parseAppend(query.append, exprMap, queryBuilder)
+
+    val resultAfterLookup = parseLookup(query.lookup, resultAfterAppend.exprMap, queryBuilder, false)
 
     val resultAfterUnnest = parseUnnest(query.unnest, resultAfterLookup.exprMap, queryBuilder)
     val unnestTests = resultAfterUnnest.strs
@@ -128,6 +137,29 @@ class SQLPPGenerator extends AsterixQueryGenerator {
 
     val resultAfterGlobalAggr = parseGlobalAggr(query.globalAggr, resultAfterSelect.exprMap, queryBuilder)
     queryBuilder.toString
+  }
+
+  private def parseAppend(appends: Seq[AppendStatement], exprMap: Map[String, FieldExpr], queryBuilder: StringBuilder): ParsedResult = {
+    if (appends.isEmpty) {
+      ParsedResult(Seq.empty, exprMap)
+    } else {
+      val producedExprs = mutable.LinkedHashMap.newBuilder[String, FieldExpr]
+      appends.foreach { append =>
+        val as = append.as
+        producedExprs += append.as.name -> FieldExpr(s"$appendVar.${as.name}", append.definition)
+      }
+      exprMap.foreach {
+        case (field, expr) =>
+          producedExprs += field -> FieldExpr(s"$appendVar.$field", s"${expr.refExpr}")
+      }
+      val newExprMap = producedExprs.result().toMap
+      val selectStr = parseProject(newExprMap)
+      queryBuilder.insert(0, s"from ($selectStr\n")
+      queryBuilder.append(s") $appendVar")
+      ParsedResult(Seq.empty, newExprMap)
+    }
+
+
   }
 
 
@@ -345,7 +377,7 @@ class SQLPPGenerator extends AsterixQueryGenerator {
       case Relation.in =>
         s"$fieldExpr in [ ${filter.values.mkString(",")} ]"
       case _ =>
-        s"$fieldExpr ${filter.values} ${filter.values.head}"
+        s"$fieldExpr ${filter.relation} ${filter.values(0)}"
     }
   }
 
