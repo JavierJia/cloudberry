@@ -11,7 +11,7 @@ import scala.concurrent.Await
 /**
   * Created by jianfeng on 4/16/17.
   */
-class TestQuery extends Connection{
+class TestQuery extends Connection {
 
   def getSeqTimeAQL(timeSeq: Seq[(DateTime, DateTime)], keyword: String): Seq[String] = {
     val keywordFilter = FilterStatement(TextField("text"), None, Relation.contains, Seq(keyword))
@@ -259,8 +259,21 @@ class TestQuery extends Connection{
 object GetSampleID extends App {
   val gen = new AQLGenerator()
   val start = new DateTime(2016, 1, 1, 0, 0)
-  0 to 365 foreach { i =>
-//    println(ResponseTime.getSamplePerDay(gen, start.plusDays(i), start.plusDays(i + 1)).split("\\\n").filterNot(_.isEmpty).mkString("\n"))
+
+  def sampleQuery(start: DateTime): String = {
+
+    s"""
+       |for $$d in dataset twitter.ds_tweet
+       |  where $$d.create_at >= datetime("${TimeFormat.print(start)}")
+       |  and $$d.create_at < datetime("${TimeFormat.print(start.plusDays(1))}")
+       |  limit 100 return $$d
+     """.stripMargin
   }
+
+  def stream(start: DateTime): Stream[DateTime] = start #:: stream(start.plusDays(1))
+
+  stream(start).takeWhile(now => now.getMillis < DateTime.now().getMillis).foreach(time =>
+    println(sampleQuery(time))
+  )
 }
 
