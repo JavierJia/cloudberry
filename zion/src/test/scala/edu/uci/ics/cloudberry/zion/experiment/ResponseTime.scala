@@ -6,6 +6,7 @@ import java.util.concurrent.Executors
 import akka.actor.ActorSystem
 import akka.stream.ActorMaterializer
 import com.typesafe.config.ConfigFactory
+import edu.uci.ics.cloudberry.zion.experiment.Common.QueryStat
 import edu.uci.ics.cloudberry.zion.model.impl.{AQLGenerator, AsterixSQLPPConn, SQLPPGenerator, TwitterDataStore}
 import edu.uci.ics.cloudberry.zion.model.schema._
 import org.apache.commons.math3.fitting.WeightedObservedPoints
@@ -19,8 +20,7 @@ import scala.concurrent.{Await, ExecutionContext, Future}
 
 trait Connection {
 
-  case class QueryStat(targetMS: Int, estSlice: Int, actualMS: Int)
-
+  val contextId = 1
   implicit val cmp: Ordering[DateTime] = Ordering.by(_.getMillis)
   val urStartDate = new DateTime(2016, 11, 4, 15, 47)
   val urEndDate = new DateTime(2017, 1, 17, 6, 16)
@@ -37,7 +37,7 @@ trait Connection {
   val aggrCount = AggregateStatement(AllField, Count, NumberField("count"))
   val globalAggr = GlobalAggregateStatement(aggrCount)
 
-  implicit val ec: ExecutionContext = ExecutionContext.fromExecutor(Executors.newFixedThreadPool(2))
+  implicit val ec: ExecutionContext = ExecutionContext.fromExecutor(Executors.newFixedThreadPool(4))
   implicit val system = ActorSystem()
   implicit val mat = ActorMaterializer()
   val wsClient = produceWSClient()
@@ -101,7 +101,7 @@ trait Connection {
 
   def timeQuery(aql: String, field: String): (Long, Int) = {
     val start = DateTime.now()
-    val f = adbConn.postQuery(aql).map { ret =>
+    val f = adbConn.postQuery(aql, Some(contextId)).map { ret =>
       val duration = new Duration(start, DateTime.now())
       val sum = (ret \\ field).map(_.as[Int]).sum
       //      println("time: " + duration.getMillis + " " + field + ": " + value)
@@ -131,6 +131,10 @@ trait Connection {
 
 }
 
+object Common{
+  case class QueryStat(targetMS: Int, estSlice: Int, actualMS: Int)
+}
+
 object ResponseTime extends App with Connection {
 
   //  TestExternalSort(gen)
@@ -139,8 +143,8 @@ object ResponseTime extends App with Connection {
 
   //    warmUp()
   //  searchBreakdown(gen)
-//  startToEnd()
-    testAdaptiveShot()
+  //  startToEnd()
+  testAdaptiveShot()
 
 
   def warmUp(): Unit = {
@@ -335,107 +339,105 @@ object ResponseTime extends App with Connection {
         }
       }
     }
-
-    def calcVariance(history: List[QueryStat]): Double = {
-      history.takeRight(history.size - 3).map(h => (h.targetMS - h.actualMS) * (h.targetMS - h.actualMS)).sum.toDouble / history.size
-      val underEstimates = history.filter(h => h.targetMS < h.actualMS)
-      underEstimates.map(h => (h.targetMS - h.actualMS) * (h.targetMS - h.actualMS)).sum.toDouble / underEstimates.size
-    }
-
-    object AlgoType extends Enumeration {
-      type Type = Value
-      val NormalGaussian = Value(1)
-      val Histogram = Value(2)
-      val Baseline = Value(3)
-    }
-
-    def estimateInGeneral(limit: Int, alpha: Double, localHistory: List[QueryStat], globalHistory: List[QueryStat], algoType: AlgoType.Type): (Double, Double) = {
-      val lastRange = localHistory.last.estSlice
-      val lastTime = localHistory.last.actualMS
-      val nextRange = lastRange * limit / lastTime
-
-      def validateRange(range: Double): Double = {
-        if (1 << localHistory.size < unit) {
-          Math.max(1, Math.min(range.toInt, lastRange * 2))
-        } else {
-          Math.max(unit, Math.min(range.toInt, lastRange * 2))
-        }
-      }
-
-      //      def validateRange(range: Double): Double = Math.max(1, range)
-
-      val closeRange = Math.max(1, Math.min(nextRange.toInt, lastRange * 2))
-      if (localHistory.size < 3) {
-        (closeRange, limit)
-      } else {
-        val variance = calcVariance(globalHistory)
-        if (variance < 0.0000001) {
-          (closeRange, limit)
-        } else {
-          val stdDev = Math.sqrt(variance)
-          val coeff = trainLinearModel(localHistory)
-          algoType match {
-            case AlgoType.NormalGaussian =>
-              val range = validateRange(Stats.getOptimalRx(timeRange, limit, stdDev, alpha, coeff.a0, coeff.a1))
-              //              println(s"range=$range,limit=$limit, o=$stdDev, a=$alpha, a0=${coeff.a0}, a1=${coeff.a1}")
-              (range, range * coeff.a1 + coeff.a0)
-            case AlgoType.Histogram =>
-              if (globalHistory.size < 20) {
-                val range = validateRange(Stats.getOptimalRx(timeRange, limit, stdDev, alpha, coeff.a0, coeff.a1))
-                return (range, range * coeff.a1 + coeff.a0)
-              }
-              val b = 100
-              val histo = new Stats.Histogram(b)
-              globalHistory.foreach(h => histo += h.actualMS - h.targetMS)
-              val probs: Seq[Double] = (0 to (limit / b - 1)).map(histo.prob) ++ Seq(histo.cumProb(limit / b))
-              val exp: Seq[Double] = Stats.useHistogramUniformFunction(timeRange, limit, b, coeff.a0, coeff.a1, alpha, probs)
-              val maxId = exp.zipWithIndex.maxBy(_._1)._2
-              val target = Math.max(0, limit - (maxId + 1) * b / 2)
-              val range = validateRange((target - coeff.a0) / coeff.a1)
-              (range, target)
-            case AlgoType.Baseline =>
-              val range = Math.max(1, (limit - coeff.a0) / coeff.a1)
-              (range, limit)
-          }
-        }
-      }
-    }
-
-    def trainLinearModel(history: List[QueryStat]): Stats.Coeff = {
-      val obs: WeightedObservedPoints = new WeightedObservedPoints()
-      if (history.size > 3) {
-        history.takeRight(history.size - 3).foreach(h => obs.add(h.estSlice, h.actualMS))
-      } else {
-        history.foreach(h => obs.add(h.estSlice, h.actualMS))
-      }
-      //      history.zip(weight).foreach{ case (h,w) =>
-      //        obs.add(0.5/sumWeight, h.estSlice, h.actualMS)
-      //      }
-
-      //      if (history.size <= 10) {
-      //        history.foreach { h =>
-      //          obs.add(0.5, history.last.estSlice, history.last.actualMS)
-      //        }
-      //      } else {
-      //        val sumWeight = history.size - 10
-      //        history.take(history.size - 10).foreach { h =>
-      //          obs.add(0.1 / sumWeight, h.estSlice, h.actualMS)
-      //        }
-      //        obs.add(0.45, history(history.size-2).estSlice, history(history.size-2).actualMS)
-      //        obs.add(0.45, history.last.estSlice, history.last.actualMS)
-      //      }
-
-      val rawCoeff = Stats.linearFitting(obs)
-
-      if (rawCoeff.a0 <= Double.MinPositiveValue || rawCoeff.a1 <= Double.MinPositiveValue) {
-        Stats.Coeff(Double.MinPositiveValue, history.last.actualMS.toDouble / history.last.estSlice)
-      } else {
-        rawCoeff
-      }
-    }
-
   }
 
+  def calcVariance(history: List[QueryStat]): Double = {
+    history.takeRight(history.size - 3).map(h => (h.targetMS - h.actualMS) * (h.targetMS - h.actualMS)).sum.toDouble / history.size
+    val underEstimates = history.filter(h => h.targetMS < h.actualMS)
+    underEstimates.map(h => (h.targetMS - h.actualMS) * (h.targetMS - h.actualMS)).sum.toDouble / underEstimates.size
+  }
+
+  object AlgoType extends Enumeration {
+    type Type = Value
+    val NormalGaussian = Value(1)
+    val Histogram = Value(2)
+    val Baseline = Value(3)
+  }
+
+  def estimateInGeneral(limit: Int, alpha: Double, localHistory: List[QueryStat], globalHistory: List[QueryStat], algoType: AlgoType.Type): (Double, Double) = {
+    val lastRange = localHistory.last.estSlice
+    val lastTime = localHistory.last.actualMS
+    val nextRange = lastRange * limit / lastTime
+
+    def validateRange(range: Double): Double = {
+      if (1 << localHistory.size < unit) {
+        Math.max(1, Math.min(range.toInt, lastRange * 2))
+      } else {
+        Math.max(unit, Math.min(range.toInt, lastRange * 2))
+      }
+    }
+
+    //      def validateRange(range: Double): Double = Math.max(1, range)
+
+    val closeRange = Math.max(1, Math.min(nextRange.toInt, lastRange * 2))
+    if (localHistory.size < 3) {
+      (closeRange, limit)
+    } else {
+      val variance = calcVariance(globalHistory)
+      if (variance < 0.0000001) {
+        (closeRange, limit)
+      } else {
+        val stdDev = Math.sqrt(variance)
+        val coeff = trainLinearModel(localHistory)
+        algoType match {
+          case AlgoType.NormalGaussian =>
+            val range = validateRange(Stats.getOptimalRx(timeRange, limit, stdDev, alpha, coeff.a0, coeff.a1))
+            //              println(s"range=$range,limit=$limit, o=$stdDev, a=$alpha, a0=${coeff.a0}, a1=${coeff.a1}")
+            (range, range * coeff.a1 + coeff.a0)
+          case AlgoType.Histogram =>
+            if (globalHistory.size < 20) {
+              val range = validateRange(Stats.getOptimalRx(timeRange, limit, stdDev, alpha, coeff.a0, coeff.a1))
+              return (range, range * coeff.a1 + coeff.a0)
+            }
+            val b = 100
+            val histo = new Stats.Histogram(b)
+            globalHistory.foreach(h => histo += h.actualMS - h.targetMS)
+            val probs: Seq[Double] = (0 to (limit / b - 1)).map(histo.prob) ++ Seq(histo.cumProb(limit / b))
+            val exp: Seq[Double] = Stats.useHistogramUniformFunction(timeRange, limit, b, coeff.a0, coeff.a1, alpha, probs)
+            val maxId = exp.zipWithIndex.maxBy(_._1)._2
+            val target = Math.max(0, limit - (maxId + 1) * b / 2)
+            val range = validateRange((target - coeff.a0) / coeff.a1)
+            (range, target)
+          case AlgoType.Baseline =>
+            val range = Math.max(1, (limit - coeff.a0) / coeff.a1)
+            (range, limit)
+        }
+      }
+    }
+  }
+
+  def trainLinearModel(history: List[QueryStat]): Stats.Coeff = {
+    val obs: WeightedObservedPoints = new WeightedObservedPoints()
+    if (history.size > 3) {
+      history.takeRight(history.size - 3).foreach(h => obs.add(h.estSlice, h.actualMS))
+    } else {
+      history.foreach(h => obs.add(h.estSlice, h.actualMS))
+    }
+    //      history.zip(weight).foreach{ case (h,w) =>
+    //        obs.add(0.5/sumWeight, h.estSlice, h.actualMS)
+    //      }
+
+    //      if (history.size <= 10) {
+    //        history.foreach { h =>
+    //          obs.add(0.5, history.last.estSlice, history.last.actualMS)
+    //        }
+    //      } else {
+    //        val sumWeight = history.size - 10
+    //        history.take(history.size - 10).foreach { h =>
+    //          obs.add(0.1 / sumWeight, h.estSlice, h.actualMS)
+    //        }
+    //        obs.add(0.45, history(history.size-2).estSlice, history(history.size-2).actualMS)
+    //        obs.add(0.45, history.last.estSlice, history.last.actualMS)
+    //      }
+
+    val rawCoeff = Stats.linearFitting(obs)
+
+    if (rawCoeff.a0 <= Double.MinPositiveValue || rawCoeff.a1 <= Double.MinPositiveValue) {
+      Stats.Coeff(Double.MinPositiveValue, history.last.actualMS.toDouble / history.last.estSlice)
+    } else {
+      rawCoeff
+    }
+  }
 
   def getAQL(start: DateTime, rangeInHour: Int, keyword: Option[String]): String = {
     val keywordFilter = keyword.map(k => FilterStatement(TextField("text"), None, Relation.contains, Seq(k)))
