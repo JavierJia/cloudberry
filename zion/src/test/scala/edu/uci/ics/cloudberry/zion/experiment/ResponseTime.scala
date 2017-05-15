@@ -139,8 +139,8 @@ object ResponseTime extends App with Connection {
 
   //    warmUp()
   //  searchBreakdown(gen)
-  //  startToEnd()
-  testAdaptiveShot()
+//  startToEnd()
+    testAdaptiveShot()
 
 
   def warmUp(): Unit = {
@@ -169,18 +169,18 @@ object ResponseTime extends App with Connection {
   }
 
   def startToEnd(): Unit = {
-    //    for (keyword <- keywords) {
-    for (keyword <- Seq("zika")) {
-      val aql = getAQL(urStartDate, new Duration(urStartDate, urEndDate).getStandardHours.toInt, Some(keyword))
-      val (runTime, avgTime, count) = multipleTime(0, aql)
+    for (keyword <- keywords) {
+      val aql = getAQL(urStartDate, new Duration(urStartDate, urEndDate).getStandardHours.toInt,
+        if (keyword.length > 0) Some(keyword) else None)
+      val (runTime, avgTime, count) = multipleTime(3, aql)
       println(s"$urStartDate,$urEndDate,$keyword, cold:$runTime, warm: $avgTime, $count")
     }
   }
 
   def testAdaptiveShot(): Unit = {
     val gaps = Seq(1, 2, 4, 8, 16, 32, 64, 128)
-    elasticTimeDouble()
-//    elasticTimeGap()
+    //    elasticTimeDouble()
+    elasticTimeGap()
 
     def elasticTimeDouble(): Unit = {
       val terminate = urStartDate
@@ -199,10 +199,11 @@ object ResponseTime extends App with Connection {
             var penalty = 0
             var sumPenalty = 0
             var numQuery = 0
+
             def streamRun(endTime: DateTime, limit: Int): Stream[(DateTime, Int)] = {
 
               val start0 = endTime.minusHours(unit.toInt)
-              numQuery+=1
+              numQuery += 1
               val aql0 = getAQL(start0, unit.toInt, if (keyword.length > 0) Some(keyword) else None)
               val (runTime0, _, count0) = multipleTime(0, aql0)
               print(s"$algo,$alpha,$start0,$unit,$keyword,$limit,$limit,$runTime0,$count0")
@@ -216,8 +217,8 @@ object ResponseTime extends App with Connection {
 
               var nextLimit = requireTime
 
-              if (runTime0 > limit){
-                penalty +=1
+              if (runTime0 > limit) {
+                penalty += 1
                 sumPenalty += runTime0.toInt - limit
                 nextLimit = requireTime
                 println(",0 missed")
@@ -226,7 +227,7 @@ object ResponseTime extends App with Connection {
 
                 if (restLimit > runTime0) { // can run another query
                   val (nextRangeModel, estTarget) = estimateInGeneral(restLimit.toInt, alpha, history.result(), fullHistory.result(), algo)
-                  val nextRangeLast = (Math.ceil(restLimit * unit/ runTime0.toDouble)).toInt
+                  val nextRangeLast = (Math.ceil(restLimit * unit / runTime0.toDouble)).toInt
                   val nextRange = Math.min(nextRangeModel, nextRangeLast)
                   val start1 = start0.minusHours(nextRange.toInt)
                   val aql1 = getAQL(start1, nextRange.toInt, if (keyword.length > 0) Some(keyword) else None)
