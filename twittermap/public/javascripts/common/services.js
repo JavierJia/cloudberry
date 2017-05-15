@@ -2,6 +2,8 @@ angular.module('cloudberry.common', [])
   .factory('cloudberryConfig', function(){
     return {
       ws: config.wsURL,
+      sentimentEnabled: config.sentimentEnabled,
+      sentimentUDF: config.sentimentUDF,
       normalizationUpscaleFactor: 1000 * 1000,
       normalizationUpscaleText: "/M",
       sentimentUpperBound: 4,
@@ -75,14 +77,6 @@ angular.module('cloudberry.common', [])
       }
     }
 
-    function mkString(array, delimiter){
-      var s = "";
-      array.forEach(function (item) {
-        s += item.toString() + delimiter;
-      });
-      return s.substring(0, s.length-1);
-    }
-
     function getFilter(parameters, maxDay) {
       var spatialField = getLevel(parameters.geoLevel);
       var keywords = [];
@@ -105,40 +99,85 @@ angular.module('cloudberry.common', [])
         }, {
           field: "text",
           relation: "contains",
-          values: [mkString(keywords, ",")]
+          values: keywords
         }
       ];
     }
 
-
-
     function byGeoRequest(parameters) {
-      return {
-        dataset: parameters.dataset,
-        filter: getFilter(parameters, defaultNonSamplingDayRange),
-        group: {
-          by: [{
-            field: "geo",
-            apply: {
-              name: "level",
-              args: {
-                level: parameters.geoLevel
-              }
-            },
-            as: parameters.geoLevel
+      if (cloudberryConfig.sentimentEnabled) {
+        return {
+          dataset: parameters.dataset,
+          append: [{
+            field: "text",
+            definition: cloudberryConfig.sentimentUDF,
+            type: "Number",
+            as: "sentimentScore"
           }],
-          aggregate: [{
-            field: "*",
-            apply: {
-              name: "count"
-            },
-            as: "count"
-          }],
-          lookup: [
-            cloudberryConfig.getPopulationTarget(parameters)
-          ]
-        }
-      };
+          filter: getFilter(parameters, defaultNonSamplingDayRange),
+          group: {
+            by: [{
+              field: "geo",
+              apply: {
+                name: "level",
+                args: {
+                  level: parameters.geoLevel
+                }
+              },
+              as: parameters.geoLevel
+            }],
+            aggregate: [{
+              field: "*",
+              apply: {
+                name: "count"
+              },
+              as: "count"
+            }, {
+              field: "sentimentScore",
+              apply: {
+                name: "sum"
+              },
+              as: "sentimentScoreSum"
+            }, {
+              field: "sentimentScore",
+              apply: {
+                name: "count"
+              },
+              as: "sentimentScoreCount"
+            }],
+            lookup: [
+              cloudberryConfig.getPopulationTarget(parameters)
+            ]
+          }
+        };
+      } else {
+        return {
+          dataset: parameters.dataset,
+          filter: getFilter(parameters, defaultNonSamplingDayRange),
+          group: {
+            by: [{
+              field: "geo",
+              apply: {
+                name: "level",
+                args: {
+                  level: parameters.geoLevel
+                }
+              },
+              as: parameters.geoLevel
+            }],
+            aggregate: [{
+              field: "*",
+              apply: {
+                name: "count"
+              },
+              as: "count"
+            }],
+            lookup: [
+              cloudberryConfig.getPopulationTarget(parameters)
+            ]
+          }
+        };
+      }
     }
 
     function byTimeRequest(parameters) {
@@ -194,7 +233,7 @@ angular.module('cloudberry.common', [])
       };
     }
 
-    var asterixService = {
+    var cloudberryService = {
 
       totalCount: 0,
       startDate: startDate,
@@ -256,29 +295,29 @@ angular.module('cloudberry.common', [])
         var result = JSONbig.parse(event.data);
         switch (result.key) {
           case "sample":
-            asterixService.tweetResult = result.value[0];
+            cloudberryService.tweetResult = result.value[0];
             break;
           case "batch":
-            asterixService.timeResult = result.value[0];
-            asterixService.mapResult = result.value[1];
-            asterixService.hashTagResult = result.value[2];
+            cloudberryService.timeResult = result.value[0];
+            cloudberryService.mapResult = result.value[1];
+            cloudberryService.hashTagResult = result.value[2];
             break;
           case "totalCount":
-            asterixService.totalCount = result.value[0][0].count;
+            cloudberryService.totalCount = result.value[0][0].count;
             break;
           case "error":
             console.error(result);
-            asterixService.errorMessage = result.value;
+            cloudberryService.errorMessage = result.value;
             break;
           case "done":
             break;
           default:
             console.error("ws get unknown data: ", result);
-            asterixService.errorMessage = "ws get unknown data: " + result.toString();
+            cloudberryService.errorMessage = "ws get unknown data: " + result.toString();
             break;
         }
       });
     };
 
-    return asterixService;
+    return cloudberryService;
   });

@@ -122,16 +122,16 @@ class SQLPPGenerator extends AsterixQueryGenerator {
     val fromStr = s"from ${query.dataset} $sourceVar".trim
     queryBuilder.append(fromStr)
 
-    val resultAfterAppend = parseAppend(query.append, exprMap, queryBuilder)
-
-    val resultAfterLookup = parseLookup(query.lookup, resultAfterAppend.exprMap, queryBuilder, false)
+    val resultAfterLookup = parseLookup(query.lookup, exprMap, queryBuilder, false)
 
     val resultAfterUnnest = parseUnnest(query.unnest, resultAfterLookup.exprMap, queryBuilder)
     val unnestTests = resultAfterUnnest.strs
 
     val resultAfterFilter = parseFilter(query.filter, resultAfterUnnest.exprMap, unnestTests, queryBuilder)
 
-    val resultAfterGroup = parseGroupby(query.groups, resultAfterFilter.exprMap, queryBuilder)
+    val resultAfterAppend = parseAppend(query.append, resultAfterFilter.exprMap, queryBuilder)
+
+    val resultAfterGroup = parseGroupby(query.groups, resultAfterAppend.exprMap, queryBuilder)
 
     val resultAfterSelect = parseSelect(query.select, resultAfterGroup.exprMap, query, queryBuilder)
 
@@ -144,16 +144,17 @@ class SQLPPGenerator extends AsterixQueryGenerator {
       ParsedResult(Seq.empty, exprMap)
     } else {
       val producedExprs = mutable.LinkedHashMap.newBuilder[String, FieldExpr]
+      
       appends.foreach { append =>
         val as = append.as
-        producedExprs += append.as.name -> FieldExpr(s"$appendVar.${as.name}", append.definition)
+        producedExprs += append.as.name -> FieldExpr(s"$appendVar.$quote${as.name}$quote", append.definition)
       }
-      exprMap.foreach {
-        case (field, expr) =>
-          producedExprs += field -> FieldExpr(s"$appendVar.$field", s"${expr.refExpr}")
+      val producedExprMap = producedExprs.result().toMap
+      val selectStr = parseProject(producedExprMap)+s",$sourceVar" 
+      
+      val newExprMap = producedExprMap ++ exprMap.mapValues{expr=>
+        FieldExpr(s"$appendVar.${expr.refExpr}", s"${expr.defExpr}")
       }
-      val newExprMap = producedExprs.result().toMap
-      val selectStr = parseProject(newExprMap)
       queryBuilder.insert(0, s"from ($selectStr\n")
       queryBuilder.append(s") $appendVar")
       ParsedResult(Seq.empty, newExprMap)
