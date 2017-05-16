@@ -5,7 +5,7 @@ import java.util.concurrent.Executors
 
 import akka.actor.ActorSystem
 import akka.stream.ActorMaterializer
-import com.typesafe.config.ConfigFactory
+import com.typesafe.config.{Config, ConfigFactory}
 import edu.uci.ics.cloudberry.zion.experiment.Common.QueryStat
 import edu.uci.ics.cloudberry.zion.model.impl.{AQLGenerator, AsterixSQLPPConn, SQLPPGenerator, TwitterDataStore}
 import edu.uci.ics.cloudberry.zion.model.schema._
@@ -38,7 +38,12 @@ trait Connection {
   val globalAggr = GlobalAggregateStatement(aggrCount)
 
   implicit val ec: ExecutionContext = ExecutionContext.fromExecutor(Executors.newFixedThreadPool(4))
-  implicit val system = ActorSystem()
+  val customConf = ConfigFactory.parseString(
+    """
+      |akka.log-dead-letters-during-shutdown = off
+      |akka.log-dead-letters = off
+      |""".stripMargin)
+  implicit val system = ActorSystem("slicing", ConfigFactory.load(customConf))
   implicit val mat = ActorMaterializer()
   val wsClient = produceWSClient()
   //  val url = "http://uranium.ics.uci.edu:19002/aql"
@@ -58,6 +63,8 @@ trait Connection {
         |    }
         |  }
         |}
+        |
+        |
       """.stripMargin))
 
     // If running in Play, environment should be injected
@@ -131,8 +138,10 @@ trait Connection {
 
 }
 
-object Common{
+object Common {
+
   case class QueryStat(targetMS: Int, estSlice: Int, actualMS: Int)
+
 }
 
 object ResponseTime extends App with Connection {

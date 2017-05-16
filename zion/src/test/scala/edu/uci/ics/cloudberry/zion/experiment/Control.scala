@@ -5,7 +5,7 @@ import java.util.concurrent.TimeUnit
 import akka.actor.{Actor, ActorRef, PoisonPill, Props}
 import edu.uci.ics.cloudberry.zion.experiment.Common.QueryStat
 import edu.uci.ics.cloudberry.zion.experiment.ResponseTime.{AlgoType, estimateInGeneral, getAQL}
-import org.joda.time.DateTime
+import org.joda.time.{DateTime, Interval}
 import play.api.Logger
 
 import scala.collection.mutable
@@ -13,25 +13,40 @@ import scala.concurrent.duration.FiniteDuration
 
 
 object Control extends App with Connection {
-  val reportLog = Logger("reporter")
+  val reportLog = Logger("report")
   val workerLog = Logger("worker")
 
   class Reporter(limit: FiniteDuration) extends Actor {
 
     object Report
 
-    context.system.scheduler.schedule(limit, limit, self, Report)
+    var schedule = context.system.scheduler.schedule(limit, limit, self, Report)
 
     val queue: mutable.Queue[Result] = new mutable.Queue[Result]()
 
     var numReports = 0
     var numFailed = 0
+    var delayed = 0l
+
+    def hungry(since: DateTime): Actor.Receive = {
+      case _: Result =>
+        val delay = new Interval(since, DateTime.now())
+        delayed += delay.toDurationMillis
+        reportLog.info(s"delayed ${delay.toDurationMillis / 1000.0}")
+        schedule = context.system.scheduler.schedule(limit, limit, self, Report)
+        context.unbecome()
+      case Report =>
+        // do nothing
+      case any =>
+        reportLog.warn(s"in hungry mode, don't know the message: $any")
+    }
 
     override def receive = {
       case result: Result => queue.enqueue(result)
       case Report => {
         if (queue.isEmpty) {
-          reportLog.info(s"!!!no result")
+          schedule.cancel()
+          context.become(hungry(DateTime.now()), false)
           numFailed += 1
         } else {
           val result = queue.dequeue()
@@ -44,7 +59,7 @@ object Control extends App with Connection {
           reportLog.info(s"report all rest results")
           numReports += 1
         }
-        reportLog.info(s"numOfReports: $numReports, numOfFails: $numFailed")
+        reportLog.info(s"numOfReports: $numReports, numOfFails: $numFailed, sumDelay: ${delayed / 1000.0}")
         self ! PoisonPill
       }
     }
@@ -61,7 +76,7 @@ object Control extends App with Connection {
     //      2 to 3 foreach { runs =>
     1 to 1 foreach { runs =>
       Seq(AlgoType.Histogram, AlgoType.NormalGaussian, AlgoType.Baseline).foreach { algo =>
-//        val alpha = Math.pow(2, runs - 1)
+        //        val alpha = Math.pow(2, runs - 1)
         val alpha = 1
         val requireTime = 2000
         val fullHistory = List.newBuilder[QueryStat]

@@ -14,23 +14,31 @@
             <level>INFO</level>
         </filter>
         <encoder>
-            <pattern>%coloredLevel %logger{15} - %message%n%xException{10}</pattern>
+            <pattern>%date %coloredLevel %logger{15} - %message%n%xException{10}</pattern>
         </encoder>
     </appender>
 
-    <appender name="CLIENT_FILE" class="ch.qos.logback.core.FileAppender">
+    <appender name="REPORT" class="ch.qos.logback.core.FileAppender">
         <file>logs/report.log</file>
         <encoder>
             <pattern>%date [%level][%logger] - %message%n</pattern>
         </encoder>
     </appender>
 
-    <logger name="reporter" level="INFO">
-        <appender-ref ref="CLIENT_FILE" />
+    <appender name="FULL" class="ch.qos.logback.core.FileAppender">
+        <file>logs/full.log</file>
+        <encoder>
+            <pattern>%date [%level][%logger] - %message%n</pattern>
+        </encoder>
+    </appender>
+
+    <logger name="report" level="INFO">
+        <appender-ref ref="REPORT" />
+        <appender-ref ref="FULL" />
     </logger>
 
     <logger name="worker" level="INFO">
-        <appender-ref ref="CLIENT_FILE" />
+        <appender-ref ref="FULL" />
     </logger>
 
 
@@ -39,6 +47,7 @@
 
     <!-- Off these ones as they are annoying, and anyway we manage configuration ourself -->
     <logger name="com.avaje.ebean.config.PropertyMapLoader" level="OFF" />
+    <logger name="akka.log-dead-letters-during-shutdown" level="OFF"/>
     <logger name="com.avaje.ebeaninternal.server.core.XmlConfigLoader" level="OFF" />
     <logger name="com.avaje.ebeaninternal.server.lib.BackgroundThread" level="OFF" />
     <logger name="com.gargoylesoftware.htmlunit.javascript" level="OFF" />
