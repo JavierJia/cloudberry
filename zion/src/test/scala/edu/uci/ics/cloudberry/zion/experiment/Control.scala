@@ -19,7 +19,7 @@ object Control extends App with Connection {
   val reportLog = Logger("report")
   val workerLog = Logger("worker")
 
-  class Reporter(limit: FiniteDuration) extends Actor {
+  class Reporter(keyword:String, limit: FiniteDuration) extends Actor {
 
     object Report
 
@@ -31,18 +31,20 @@ object Control extends App with Connection {
     var numReports = 0
     var numFailed = 0
     var delayed = 0l
+    var sumResult = 0
 
     def hungry(since: DateTime): Actor.Receive = {
-      case _: OneShot =>
+      case r: OneShot =>
         val delay = new Interval(since, DateTime.now())
         delayed += delay.toDurationMillis
-        reportLog.info(s"delayed ${delay.toDurationMillis / 1000.0}")
+        sumResult += r.count
+        reportLog.info(s"$keyword delayed ${delay.toDurationMillis / 1000.0}")
         schedule = context.system.scheduler.schedule(limit, limit, self, Report)
         context.unbecome()
       case Report =>
       // do nothing
       case any =>
-        reportLog.warn(s"in hungry mode, don't know the message: $any")
+        reportLog.warn(s"$keyword in hungry mode, don't know the message: $any")
     }
 
     override def receive = {
@@ -54,24 +56,26 @@ object Control extends App with Connection {
           numFailed += 1
         } else {
           val result = queue.dequeue()
-          reportLog.info(s"report result from ${result.start} of range ${result.range}")
+          sumResult += result.count
+          reportLog.info(s"$keyword report result from ${result.start} of range ${result.range}")
         }
         numReports += 1
       }
       case Fin => {
         if (!queue.isEmpty) {
-          reportLog.info(s"report all rest results")
+          reportLog.info(s"$keyword, report all rest results")
           numReports += 1
+          sumResult += queue.dequeueAll(r => true).map(_.count).sum
         }
         val totalTime = DateTime.now().getMillis - startTime.getMillis
-        reportLog.info(s"numOfReports: $numReports, sumTime: ${totalTime / 1000.0}, numOfFail: $numFailed, sumDelay: ${delayed / 1000.0}")
+        reportLog.info(s"$keyword numOfReports: $numReports, sumTime: ${totalTime / 1000.0}, numOfFail: $numFailed, sumDelay: ${delayed / 1000.0}, sumCount:$sumResult")
         reportLog.info(s"=============FIN===============")
         self ! PoisonPill
       }
     }
   }
 
-  case class OneShot(start: DateTime, range: Int)
+  case class OneShot(start: DateTime, range: Int, count:Int)
 
   case object Fin
 
@@ -97,7 +101,7 @@ object Control extends App with Connection {
 
           val tick = DateTime.now()
 
-          val reporter = system.actorOf(Props(new Reporter(FiniteDuration(requireTime, TimeUnit.MILLISECONDS))))
+          val reporter = system.actorOf(Props(new Reporter(keyword, FiniteDuration(requireTime, TimeUnit.MILLISECONDS))))
           //          val list = streamRun(requireTime, algo, alpha, reporter, keyword, history, fullHistory, urEndDate, 2, requireTime, requireTime)
           val list = cancelableScheduling(requireTime, urEndDate, Parameters(requireTime, algo, alpha, reporter, keyword, 1), State(history, fullHistory))
             .takeWhile(_.getMillis > terminate.getMillis).toList
@@ -111,7 +115,6 @@ object Control extends App with Connection {
           val variance = histo.map(h => (h.targetMS - h.actualMS) * (h.targetMS - h.actualMS)).sum.toDouble / histo.size
           workerLog.info("algorithm,alpha,requireTime,unit,keyword,numQuery,totalTime,aveTime, $variance")
           workerLog.info(s"$algo,$alpha,$requireTime,$unit,$keyword,${list.size},${totalTime / 1000.0},${totalTime / list.size / 1000.0}, $variance")
-          workerLog.info("===================")
         }
       }
     }
@@ -128,7 +131,7 @@ object Control extends App with Connection {
     val start = endTime.minusHours(range)
     val aql = getAQL(start, range, if (keyword.length > 0) Some(keyword) else None)
     val (runTime, _, count) = multipleTime(0, aql)
-    reporter ! OneShot(start, range)
+    reporter ! OneShot(start, range, count)
 
     history += QueryStat(target, range, runTime.toInt)
     fullHistory += QueryStat(target, range, runTime.toInt)
@@ -145,17 +148,17 @@ object Control extends App with Connection {
       reporter, keyword, history, fullHistory, start, nextRange.toInt, nextLimit, estTarget.toInt)
   }
 
-  def runAQuery(query: String): Future[ResultFromDB] = {
+  def runAQuery(query: String, contextID:Int ): Future[ResultFromDB] = {
     val start = DateTime.now
-    adbConn.postQuery(query, Some(contextId)).map { ret =>
+    adbConn.postQuery(query, Some(contextID)).map { ret =>
       val duration = DateTime.now.getMillis - start.getMillis
       val sum = (ret \\ "count").map(_.as[Int]).sum
       ResultFromDB(duration, sum)
     }
   }
 
-  def cancelPreviousQuery(): Unit = {
-    adbConn.cancel(cancelURL, contextId).map { response: WSResponse =>
+  def cancelPreviousQuery(contextID: Int): Unit = {
+    adbConn.cancel(cancelURL, contextID).map { response: WSResponse =>
       Logger.info(response.body)
     }
   }
@@ -182,14 +185,17 @@ object Control extends App with Connection {
                            parameters: Parameters,
                            state: State
                           ): Stream[DateTime] = {
+
+    val QueryIDNormal = 1
+    val QueryIDADV = 2
     val start = endTime.minusHours(parameters.minHours)
     // first minQuery
     val optKeyword = if (parameters.keyword.length > 0) Some(parameters.keyword) else None
     val query = getAQL(start, parameters.minHours, optKeyword)
-    val f = runAQuery(query)
+    val f = runAQuery(query, QueryIDNormal)
     // we have to wait no matter how slow it it
     val retMin = Await.result(f, scala.concurrent.duration.Duration.Inf)
-    parameters.reporter ! OneShot(start, parameters.minHours)
+    parameters.reporter ! OneShot(start, parameters.minHours, retMin.sum)
 
     workerLog.info(s"FirstMin: ${parameters.algo},${parameters.alpha},$start,${parameters.minHours},${parameters.keyword},${curDeadline},MIN,${retMin.mills},${retMin.sum}")
     learnQueryState(start, parameters.minHours, None, retMin.mills, state)
@@ -212,10 +218,10 @@ object Control extends App with Connection {
     val startAdventure = start.minusHours(adventureRange.toInt)
     val queryAdventure = getAQL(startAdventure, adventureRange.toInt, optKeyword)
 
-    val fAdv = runAQuery(queryAdventure)
+    val fAdv = runAQuery(queryAdventure, QueryIDADV)
     try {
       val retAdv = Await.result(fAdv, FiniteDuration(target, TimeUnit.MILLISECONDS))
-      parameters.reporter ! OneShot(startAdventure, adventureRange.toInt)
+      parameters.reporter ! OneShot(startAdventure, adventureRange.toInt, retAdv.sum)
 
       workerLog.info(s"Advnture: ${parameters.algo},${parameters.alpha},$startAdventure,${adventureRange.toInt},${parameters.keyword},${target},${estTarget.toInt},${retAdv.mills},${retAdv.sum}")
 
@@ -225,14 +231,14 @@ object Control extends App with Connection {
     } catch {
       case e: TimeoutException =>
         // cancel it and start over again
-        cancelPreviousQuery()
+        cancelPreviousQuery(QueryIDADV)
         workerLog.info(s"Cancel Adventure query")
-        val startMakeUp = start.minusHours(retMin.mills.toInt)
+        val startMakeUp = start.minusHours(parameters.minHours)
         val makeupQuery = getAQL(startMakeUp, parameters.minHours, optKeyword)
-        val fMakeup = runAQuery(makeupQuery)
+        val fMakeup = runAQuery(makeupQuery, QueryIDNormal)
         // we have to wait no matter how slow it it
         val retMakeup = Await.result(fMakeup, scala.concurrent.duration.Duration.Inf)
-        parameters.reporter ! OneShot(startMakeUp, parameters.minHours)
+        parameters.reporter ! OneShot(startMakeUp, parameters.minHours, retMakeup.sum)
 
         learnQueryState(startMakeUp, parameters.minHours, Some(retMin.mills), retMakeup.mills, state)
 

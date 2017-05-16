@@ -33,7 +33,7 @@ trait Connection {
   //  val keywords = Seq("zika", "flood", "election", "clinton", "trump", "happy", "")
   val keywords = Seq("zika", "flood", "rain", "election", "clinton", "trump", "")
 
-  val queryGen = new NgramSQLPPGenerator()
+  val queryGen = new SQLPPGenerator()
   val aggrCount = AggregateStatement(AllField, Count, NumberField("count"))
   val globalAggr = GlobalAggregateStatement(aggrCount)
 
@@ -152,7 +152,7 @@ object ResponseTime extends App with Connection {
 
   //    warmUp()
   //  searchBreakdown(gen)
-  //  startToEnd()
+//    startToEnd()
   testAdaptiveShot()
 
 

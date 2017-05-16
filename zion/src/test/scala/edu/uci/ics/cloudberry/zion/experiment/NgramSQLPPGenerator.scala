@@ -6,6 +6,7 @@ import edu.uci.ics.cloudberry.zion.model.schema.FilterStatement
 /**
   * Created by jianfeng on 4/17/17.
   */
+@deprecated
 class NgramSQLPPGenerator extends SQLPPGenerator{
   override protected def parseTextRelation(filter: FilterStatement, fieldExpr: String): String = {
     val first = s"${typeImpl.similarityJaccard}(${typeImpl.wordTokens}($fieldExpr), ${typeImpl.wordTokens}('${filter.values.head}')) > 0.0"
