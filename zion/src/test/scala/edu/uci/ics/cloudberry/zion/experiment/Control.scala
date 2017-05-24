@@ -84,11 +84,10 @@ object Control extends App with Connection {
     //        0.9 to 0.1 by -0.1 foreach { discount =>
     //      45 to 2600 by 5 foreach { minGap=>
     //      2 to 3 foreach { runs =>
-    1 to 1 foreach { runs =>
-//      Seq(AlgoType.Baseline,AlgoType.NormalGaussian,AlgoType.Histogram).foreach { algo =>
-      Seq(AlgoType.Baseline).foreach { algo =>
-        //        val alpha = Math.pow(2, runs - 1)
-        val alpha = 1
+    2 to 3 foreach { runs =>
+      Seq(AlgoType.Baseline,AlgoType.NormalGaussian,AlgoType.Histogram).foreach { algo =>
+//      Seq(AlgoType.Baseline).foreach { algo =>
+        val alpha = Math.pow(2, runs - 1)
         val requireTime = 2000
         val fullHistory = List.newBuilder[QueryStat]
 
@@ -103,8 +102,8 @@ object Control extends App with Connection {
           val tick = DateTime.now()
 
           val reporter = system.actorOf(Props(new Reporter(keyword, FiniteDuration(requireTime, TimeUnit.MILLISECONDS))))
-//          val list = streamRun(requireTime, algo, alpha, reporter, keyword, history, fullHistory, urEndDate, 2, requireTime, requireTime)
-          val list = cancelableScheduling(requireTime, urEndDate, Parameters(requireTime, algo, alpha, reporter, keyword, 1), State(history, fullHistory))
+          val list = streamRun(requireTime, algo, alpha, reporter, keyword, history, fullHistory, urEndDate, 2, requireTime, requireTime)
+//          val list = cancelableScheduling(requireTime, urEndDate, Parameters(requireTime, algo, alpha, reporter, keyword, 1), State(history, fullHistory))
             .takeWhile(_.getMillis > terminate.getMillis).toList
           val tock = DateTime.now()
           val totalTime = tock.getMillis - tick.getMillis
@@ -186,65 +185,6 @@ object Control extends App with Connection {
     val ret = idAdventrue
     idAdventrue+=1
     ret
-  }
-
-  def decideMinWindow(parameters: Parameters, state: State): Int = {
-    //option one, pick the most recent min time
-    val history = state.history.result()
-    val id = history.lastIndexWhere(_.estSlice == parameters.minHours)
-    if (id > 0){
-      history(id).actualMS
-    } else {
-      0.5
-    }
-  }
-
-  def cancelableOneOnOne(curDeadLine: Int,
-                         endTime: DateTime,
-                         parameters: Parameters,
-                         state: State): Stream[DateTime]= {
-    val makeupWindow: Int = decideMinWindow(parameters, state)
-    val preDeadline = curDeadLine - makeupWindow
-
-    if (preDeadline < makeupWindow){
-      ???
-    }
-
-    val optKeyword = if (parameters.keyword.length > 0) Some(parameters.keyword) else None
-
-    val (adventureRange, estTarget) = estimateInGeneral(preDeadline, parameters.alpha, state.history.result(), state.fullHistory.result(), parameters.algo)
-    val startTime = endTime.minusHours(adventureRange.toInt)
-    val queryAdventure = getAQL(startTime, adventureRange.toInt, optKeyword)
-
-    val f = runAQuery(queryAdventure, getIDADV)
-
-    try {
-      val ret = Await.result(f, FiniteDuration.apply(preDeadline, TimeUnit.MILLISECONDS))
-      parameters.reporter ! OneShot(startTime, parameters.minHours, ret.sum)
-
-      val extra = curDeadLine - ret.mills + parameters.reportInterval
-      learnQueryState(startTime, adventureRange.toInt, Some(estTarget.toLong), ret.mills, state)
-      return endTime #:: cancelableScheduling(extra.toInt, startTime, parameters, state)
-    } catch {
-      case e: TimeoutException => {
-        val startMakeUp = endTime.minusHours(parameters.minHours)
-        val makeupQuery = getAQL(startMakeUp, parameters.minHours, optKeyword)
-        val queryIDMakeup = getIDADV
-        val fMakeup = runAQuery(makeupQuery, queryIDMakeup)
-
-        //wait for whichever comes first
-        ???
-        val retMakeup = Await.result(fMakeup, scala.concurrent.duration.Duration.Inf)
-        parameters.reporter ! OneShot(startMakeUp, parameters.minHours, retMakeup.sum)
-
-        learnQueryState(startMakeUp, parameters.minHours, Some(retMin.mills), retMakeup.mills, state)
-
-        workerLog.info(s"Makeupqr: ${parameters.algo},${parameters.alpha},$startMakeUp,${parameters.minHours},${parameters.keyword},${retMin.mills},${retMin.mills},${retMakeup.mills},${retMakeup.sum}")
-
-        val residual = Math.max(0, retMin.mills - retMakeup.mills).toInt
-
-        return endTime #:: cancelableScheduling(residual + parameters.reportInterval, startMakeUp, parameters, state)
-    }
   }
 
   def cancelableScheduling(curDeadline: Int,
