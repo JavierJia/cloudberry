@@ -36,7 +36,7 @@ trait Connection {
   val aggrCount = AggregateStatement(AllField, Count, NumberField("count"))
   val globalAggr = GlobalAggregateStatement(aggrCount)
 
-  implicit val ec: ExecutionContext = ExecutionContext.fromExecutor(Executors.newFixedThreadPool(4))
+  implicit val ec: ExecutionContext = ExecutionContext.fromExecutor(Executors.newFixedThreadPool(10))
   val customConf = ConfigFactory.parseString(
     """
       |akka.log-dead-letters-during-shutdown = off
@@ -85,6 +85,7 @@ trait Connection {
 
   def exit(): Unit = {
     wsClient.close()
+    system.terminate()
     System.exit(0)
   }
 

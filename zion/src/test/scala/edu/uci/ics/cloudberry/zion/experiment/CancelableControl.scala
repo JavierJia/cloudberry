@@ -5,7 +5,6 @@ import java.util.concurrent.TimeUnit
 import edu.uci.ics.cloudberry.zion.experiment.Common.Reporter.OneShot
 import edu.uci.ics.cloudberry.zion.experiment.Common._
 import org.joda.time.DateTime
-import play.Logger
 import play.api.Logger
 import play.api.libs.ws.WSResponse
 

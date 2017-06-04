@@ -6,6 +6,7 @@ import org.joda.time.DateTime
 import play.api.Logger
 
 import scala.collection.mutable
+import scala.concurrent.ExecutionContext
 import scala.concurrent.duration.FiniteDuration
 
 object Common {
@@ -33,14 +34,14 @@ object Common {
   case class HistoryStats(history: mutable.Builder[Common.QueryStat, List[Common.QueryStat]],
                           fullHistory: mutable.Builder[Common.QueryStat, List[Common.QueryStat]])
 
-  class Reporter(keyword: String, limit: FiniteDuration) extends Actor {
+  class Reporter(keyword: String, limit: FiniteDuration)(implicit val ec : ExecutionContext) extends Actor {
 
     import Reporter._
 
     object Report
 
     var schedule = context.system.scheduler.schedule(limit, limit, self, Report)
-    val startTime = DateTime.now();
+    val startTime = DateTime.now()
 
     val queue: mutable.Queue[OneShot] = new mutable.Queue[OneShot]()
 

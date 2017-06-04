@@ -1,13 +1,13 @@
 package edu.uci.ics.cloudberry.zion.experiment
 
-import akka.actor.{Actor, ActorRef, FSM}
-import akka.pattern.pipe
+import akka.actor.{Actor, ActorRef, FSM, PoisonPill, Props}
+import akka.pattern.{ask, pipe}
+import akka.util.Timeout
 import edu.uci.ics.cloudberry.zion.TInterval
-import edu.uci.ics.cloudberry.zion.experiment.ControlBackup.Scheduler.{SchedulerData, SchedulerState}
 import org.joda.time.DateTime
 import play.api.Logger
 
-import scala.concurrent.Future
+import scala.concurrent.{Await, Future}
 import scala.concurrent.duration._
 
 object ControlBackup extends App with Connection {
@@ -34,7 +34,7 @@ object ControlBackup extends App with Connection {
   }
 
 
-  class Scheduler extends FSM[SchedulerState, SchedulerData] {
+  class Scheduler extends FSM[Scheduler.SchedulerState, Scheduler.SchedulerData] {
 
     import Scheduler._
 
@@ -61,8 +61,29 @@ object ControlBackup extends App with Connection {
         goto(Risk) using StateData(request, historyStats, backupHistoryStats)
     }
 
+    when(Risk) {
+      case Event(FireRisk, StateData(r@Request(parameters, endTime, till, reportLimit), riskStats, backupStats)) =>
+        workerLog.info("@Risk fire risk query")
+
+        if (endTime.getMillis <= till.getMillis) {
+          parameters.reporter ! Reporter.Fin
+          goto(Idle) using Uninitialized
+        }
+
+        val RangeAndEstTime(rRisk, estMills) = decideRRiskAndESTTime(endTime, till, riskStats, parameters)
+
+        val start = endTime.minusHours(rRisk)
+        val sql = ResponseTime.getAQL(start, rRisk, toOpt(parameters.keyword))
+        runAQuery(sql, DBResultType.RISK, start, endTime, rRisk, estMills) pipeTo self
+
+        val waitingTimeOut = decideWaitTime(backupStats, reportLimit)
+        setTimer(WaitTimerName, WaitTimeOut, waitingTimeOut millis)
+        goto(Waiting) using StateDataWithTimeOut(r, waitingTimeOut, false, riskStats, backupStats)
+    }
+
     when(Waiting) {
       case Event(response: LabeledDBResult, StateDataWithTimeOut(request, waitTimeOut, _, riskStats, backupStats)) =>
+        workerLog.info(s"@Waiting, receive response $response")
         val start = response.interval.getStart
         request.parameters.reporter ! Reporter.OneShot(start, response.range, response.result.sum)
         learnQueryState(start, response.range, Some(response.estMills), response.result.mills, riskStats)
@@ -74,18 +95,32 @@ object ControlBackup extends App with Connection {
 
         goto(Risk) using StateData(request.copy(endTime = start, reportLimit = nextLimit.toInt), riskStats, backupStats)
       case Event(WaitTimeOut, _) =>
+        workerLog.info(s"@Waiting, wait time out")
         goto(Panic)
     }
 
     when(Panic) {
+      case Event(FireBackup, StateDataWithTimeOut(Request(parameters, endTime, till, reportLimit), waitTimeOut, false, riskStats, backupStats)) =>
+        workerLog.info(s"@Panic, fire backup query")
+        val panicLimit = reportLimit - waitTimeOut - 50
+        val RangeAndEstTime(rBackup, estMills) = decideRBackAndESTTime(endTime, till, panicLimit, backupStats, parameters)
+
+        val start = endTime.minusHours(rBackup)
+        val sql = ResponseTime.getAQL(start, rBackup, toOpt(parameters.keyword))
+        runAQuery(sql, DBResultType.BACKUP, start, endTime, rBackup, estMills) pipeTo self
+
+        setTimer(PanicTimerName, PanicTimeOut, panicLimit millis)
+        stay
       case Event(r@LabeledDBResult(label, interval, range, estMills, result), s@StateDataWithTimeOut(request, waitTimeOut, isPanicTimeOut, riskStats, backupStats)) =>
-        cancelTimer(PanicTimerName)
+        // Or StateDataWithBackupResult
+        workerLog.info(s"@Panic, receive response $r")
         label match {
           case DBResultType.RISK =>
             val start = interval.getStart
             request.parameters.reporter ! Reporter.OneShot(start, range, result.sum)
             learnQueryState(start, range, Some(estMills), result.mills, riskStats)
 
+            cancelTimer(PanicTimerName)
             val nextLimit = if (isPanicTimeOut) request.parameters.reportInterval else request.parameters.reportInterval + request.reportLimit - result.mills
             goto(Risk) using StateData(request.copy(endTime = start, reportLimit = nextLimit.toInt), riskStats, backupStats)
 
@@ -107,9 +142,11 @@ object ControlBackup extends App with Connection {
             stay
         }
       case Event(PanicTimeOut, s: StateDataWithTimeOut) =>
+        workerLog.info(s"@Panic, panic time out without any result")
         stay using s.copy(panicTimeOut = true)
 
       case Event(PanicTimeOut, StateDataWithBackupResult(state, backupResult)) =>
+        workerLog.info(s"@Panic, panic time out with backup result $backupResult")
         val nextLimit = state.request.parameters.reportInterval
         val waitTimeOut = reportBackup(state.request.parameters.reporter, backupResult, state.backupStats, nextLimit)
 
@@ -128,47 +165,20 @@ object ControlBackup extends App with Connection {
     }
 
     onTransition {
-      case _ -> Risk =>
-        stateData match {
-          case StateData(r @ Request(parameters, endTime, till, reportLimit), riskStats, backupStats) =>
-
-            if (endTime.getMillis < till.getMillis) {
-              parameters.reporter ! Reporter.Fin
-              goto(Idle) using Uninitialized
-            }
-
-            val (rRisk, estMills) = decideRRiskAndESTTime(endTime, till, riskStats, parameters)
-
-            val start = endTime.minusHours(rRisk)
-            val sql = ResponseTime.getAQL(start, rRisk, toOpt(parameters.keyword))
-            runAQuery(sql, DBResultType.RISK, start, endTime, rRisk, estMills) pipeTo self
-
-            val waitingTimeOut = decideWaitTime(backupStats, reportLimit)
-            setTimer(WaitTimerName, WaitTimeOut, waitingTimeOut millis)
-            goto(Waiting) using StateDataWithTimeOut(r, waitingTimeOut, false, riskStats, backupStats)
-          case any =>
-            workerLog.error(s"WTF state : $any")
-        }
+      case any -> Risk =>
+        workerLog.info(s"transition from $any to Risk")
+        self ! FireRisk
       case Waiting -> Panic =>
-        stateData match {
-          case StateDataWithTimeOut(Request(parameters, endTime, till, reportLimit), waitTimeOut, false, riskStats, backupStats) =>
-
-            val panicLimit = reportLimit - waitTimeOut - 50
-            val (rBackup, estMills) = decideRBackAndESTTime(endTime, till, panicLimit, backupStats, parameters)
-
-            val start = endTime.minusHours(rBackup)
-            val sql = ResponseTime.getAQL(start, rBackup, toOpt(parameters.keyword))
-            runAQuery(sql, DBResultType.BACKUP, start, endTime, rBackup, estMills) pipeTo self
-
-            setTimer(PanicTimerName, PanicTimeOut, panicLimit millis)
-          case any =>
-            workerLog.error(s"WTF transition Waiting -> Panic hit unknown stateData: $any")
-        }
+        workerLog.info(s"transition from Waiting to Panic")
+        self ! FireBackup
       case a -> b =>
         workerLog.error(s"WTF state transition from $a to $b")
     }
 
     whenUnhandled {
+      case Event(CheckState, _) =>
+        sender() ! stateName
+        stay
       case Event(any, stateData) =>
         workerLog.error(s"WTF $stateName received msg $any, using data $stateData")
         stay
@@ -225,6 +235,44 @@ object ControlBackup extends App with Connection {
 
     case object PanicTimeOut
 
+    case object CheckState
+
+    case object FireRisk
+
+    case object FireBackup
+
   }
+
+  //// main class
+  import scala.util.control.Breaks._
+
+  def process: Unit = {
+    import Scheduler._
+    val reportInterval = 2000
+    for (keyword <- Seq("")) {
+      val scheduler = system.actorOf(Props(new Scheduler()))
+      val reporter = system.actorOf(Props(new Reporter(keyword, reportInterval millis)))
+      scheduler ! Request(Parameters(reportInterval, AlgoType.Baseline, 1, reporter, keyword, 1), urEndDate, urStartDate, reportInterval)
+      breakable {
+        while (true) {
+          implicit val timeOut: Timeout = Timeout(5 seconds)
+          (Await.result(scheduler ? CheckState, Duration.Inf)).asInstanceOf[SchedulerState] match {
+            case Idle =>
+              scheduler ! PoisonPill
+              break
+            case any =>
+              workerLog.info(s"CheckState is $any")
+              Thread.sleep(2000)
+          }
+        }
+      }
+
+    }
+  }
+
+
+  process
+  exit()
+
 
 }
