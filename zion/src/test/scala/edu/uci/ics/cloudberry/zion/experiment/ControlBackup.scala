@@ -63,22 +63,24 @@ object ControlBackup extends App with Connection {
 
     when(Risk) {
       case Event(FireRisk, StateData(r@Request(parameters, endTime, till, reportLimit), riskStats, backupStats)) =>
-        workerLog.info("@Risk fire risk query")
 
         if (endTime.getMillis <= till.getMillis) {
+          workerLog.info("@Risk DONE")
           parameters.reporter ! Reporter.Fin
           goto(Idle) using Uninitialized
+        } else {
+
+          workerLog.info("@Risk fire risk query")
+          val RangeAndEstTime(rRisk, estMills) = decideRRiskAndESTTime(endTime, till, riskStats, parameters)
+
+          val start = endTime.minusHours(rRisk)
+          val sql = ResponseTime.getAQL(start, rRisk, toOpt(parameters.keyword))
+          runAQuery(sql, DBResultType.RISK, start, endTime, rRisk, estMills) pipeTo self
+
+          val waitingTimeOut = decideWaitTime(backupStats, reportLimit)
+          setTimer(WaitTimerName, WaitTimeOut, waitingTimeOut millis)
+          goto(Waiting) using StateDataWithTimeOut(r, waitingTimeOut, false, riskStats, backupStats)
         }
-
-        val RangeAndEstTime(rRisk, estMills) = decideRRiskAndESTTime(endTime, till, riskStats, parameters)
-
-        val start = endTime.minusHours(rRisk)
-        val sql = ResponseTime.getAQL(start, rRisk, toOpt(parameters.keyword))
-        runAQuery(sql, DBResultType.RISK, start, endTime, rRisk, estMills) pipeTo self
-
-        val waitingTimeOut = decideWaitTime(backupStats, reportLimit)
-        setTimer(WaitTimerName, WaitTimeOut, waitingTimeOut millis)
-        goto(Waiting) using StateDataWithTimeOut(r, waitingTimeOut, false, riskStats, backupStats)
     }
 
     when(Waiting) {
@@ -111,35 +113,41 @@ object ControlBackup extends App with Connection {
 
         setTimer(PanicTimerName, PanicTimeOut, panicLimit millis)
         stay
-      case Event(r@LabeledDBResult(label, interval, range, estMills, result), s@StateDataWithTimeOut(request, waitTimeOut, isPanicTimeOut, riskStats, backupStats)) =>
-        // Or StateDataWithBackupResult
-        workerLog.info(s"@Panic, receive response $r")
-        label match {
-          case DBResultType.RISK =>
-            val start = interval.getStart
-            request.parameters.reporter ! Reporter.OneShot(start, range, result.sum)
-            learnQueryState(start, range, Some(estMills), result.mills, riskStats)
+      case Event(r@LabeledDBResult(DBResultType.RISK, interval, range, estMills, result), s) =>
+        workerLog.info(s"@Panic, receive risk response $r")
+        val start = interval.getStart
+        val data = s match {
+          case ss: StateDataWithTimeOut => ss
+          case ss: StateDataWithBackupResult => ss.stateDataWithTimeOut
+        }
+        data.request.parameters.reporter ! Reporter.OneShot(start, range, result.sum)
+        learnQueryState(start, range, Some(estMills), result.mills, data.riskStats)
 
-            cancelTimer(PanicTimerName)
-            val nextLimit = if (isPanicTimeOut) request.parameters.reportInterval else request.parameters.reportInterval + request.reportLimit - result.mills
-            goto(Risk) using StateData(request.copy(endTime = start, reportLimit = nextLimit.toInt), riskStats, backupStats)
+        cancelTimer(PanicTimerName)
+        val nextLimit = if (data.panicTimeOut) {
+          data.request.parameters.reportInterval
+        } else {
+          data.request.parameters.reportInterval + data.request.reportLimit - result.mills
+        }
+        goto(Risk) using StateData(data.request.copy(endTime = start, reportLimit = nextLimit.toInt), data.riskStats, data.backupStats)
 
-          case DBResultType.BACKUP if interval.getEndMillis <= request.endTime.getMillis => // receive from the previous backup query
-            if (isPanicTimeOut) {
+      case Event(r@LabeledDBResult(DBResultType.BACKUP, interval, range, estMills, result), s@StateDataWithTimeOut(request, waitTimeOut, isPanicTimeOut, riskStats, backupStats)) =>
+        workerLog.info(s"@Panic, receive backup result $r")
+        if (interval.getEndMillis <= request.endTime.getMillis) {
+          if (isPanicTimeOut) {
 
-              val nextLimit = request.parameters.reportInterval
-              val waitTimeOut = reportBackup(request.parameters.reporter, r, backupStats, nextLimit)
+            val nextLimit = request.parameters.reportInterval
+            val waitTimeOut = reportBackup(request.parameters.reporter, r, backupStats, nextLimit)
 
-              goto(Waiting) using s.copy(request = request.copy(endTime = interval.getStart, reportLimit = nextLimit), waitTimeOut = waitTimeOut, panicTimeOut = false)
+            goto(Waiting) using s.copy(request = request.copy(endTime = interval.getStart, reportLimit = nextLimit), waitTimeOut = waitTimeOut, panicTimeOut = false)
 
-            } else {
-              // hold the result
-              stay using StateDataWithBackupResult(s, r)
-            }
-
-          case other =>
-            workerLog.info(s"receive something different : $other")
-            stay
+          } else {
+            // hold the result
+            stay using StateDataWithBackupResult(s, r)
+          }
+        } else {
+          // receive from the previous backup query
+          stay
         }
       case Event(PanicTimeOut, s: StateDataWithTimeOut) =>
         workerLog.info(s"@Panic, panic time out without any result")

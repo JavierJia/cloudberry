@@ -80,9 +80,10 @@ object Common {
       }
       case Fin => {
         if (!queue.isEmpty) {
-          reportLog.info(s"$keyword, report all rest results")
+          val all = queue.dequeueAll(_ => true)
+          reportLog.info(s"$keyword report result from ${all.map(_.start).head} of range ${all.map(_.range).sum}")
           numReports += 1
-          sumResult += queue.dequeueAll(_ => true).map(_.count).sum
+          sumResult += all.map(_.count).sum
         }
         val totalTime = DateTime.now().getMillis - startTime.getMillis
         reportLog.info(s"$keyword numOfReports: $numReports, sumTime: ${totalTime / 1000.0}, numOfFail: $numFailed, sumDelay: ${delayed / 1000.0}, sumCount:$sumResult")
