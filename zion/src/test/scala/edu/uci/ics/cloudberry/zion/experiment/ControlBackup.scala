@@ -62,10 +62,12 @@ object ControlBackup extends App with Connection {
     }
 
     when(Waiting) {
-      case Event(response: LabeledDBResult, StateDataWithTimeOut(request, waitTimeOut, panicTimeOut, riskStats, backupStats)) =>
+      case Event(response: LabeledDBResult, StateDataWithTimeOut(request, waitTimeOut, _, riskStats, backupStats)) =>
         val start = response.interval.getStart
         request.parameters.reporter ! Reporter.OneShot(start, response.range, response.result.sum)
         learnQueryState(start, response.range, Some(response.estMills), response.result.mills, riskStats)
+
+        cancelTimer(WaitTimerName)
 
         // can't be overtime in waiting mode
         val nextLimit = request.parameters.reportInterval + request.reportLimit - response.result.mills
@@ -77,13 +79,14 @@ object ControlBackup extends App with Connection {
 
     when(Panic) {
       case Event(r@LabeledDBResult(label, interval, range, estMills, result), s@StateDataWithTimeOut(request, waitTimeOut, isPanicTimeOut, riskStats, backupStats)) =>
+        cancelTimer(PanicTimerName)
         label match {
           case DBResultType.RISK =>
             val start = interval.getStart
             request.parameters.reporter ! Reporter.OneShot(start, range, result.sum)
             learnQueryState(start, range, Some(estMills), result.mills, riskStats)
 
-            val nextLimit = if (isPanicTimeOut) request.reportLimit else request.reportLimit + request.reportLimit - result.mills
+            val nextLimit = if (isPanicTimeOut) request.parameters.reportInterval else request.parameters.reportInterval + request.reportLimit - result.mills
             goto(Risk) using StateData(request.copy(endTime = start, reportLimit = nextLimit.toInt), riskStats, backupStats)
 
           case DBResultType.BACKUP if interval.getEndMillis <= request.endTime.getMillis => // receive from the previous backup query
@@ -111,14 +114,6 @@ object ControlBackup extends App with Connection {
         val waitTimeOut = reportBackup(state.request.parameters.reporter, backupResult, state.backupStats, nextLimit)
 
         goto(Waiting) using state.copy(request = state.request.copy(endTime = backupResult.interval.getStart, reportLimit = nextLimit), waitTimeOut = waitTimeOut, panicTimeOut = false)
-      case Event(anyMsg, anyData) =>
-        workerLog.error(s"WTF: panic state receive msg: $anyMsg, stateData: $anyData")
-        stay
-    }
-
-    def reportRisk(reporter: ActorRef, start: DateTime, range: Int, result: ResultFromDB, estMills: Int, historyStats: HistoryStats): Unit = {
-      reporter ! Reporter.OneShot(start, range, result.sum)
-      learnQueryState(start, range, Some(estMills), result.mills, historyStats)
     }
 
     def reportBackup(reporter: ActorRef, dbResult: LabeledDBResult, backupStats: HistoryStats, nextLimit: Int): Int = {
@@ -128,54 +123,54 @@ object ControlBackup extends App with Connection {
       learnQueryState(start, range, Some(dbResult.estMills), dbResult.result.mills, backupStats)
 
       val waitingTimeOut = decideWaitTime(backupStats, nextLimit)
-      setTimer("wait", WaitTimeOut, waitingTimeOut millis)
+      setTimer(WaitTimerName, WaitTimeOut, waitingTimeOut millis)
       waitingTimeOut
     }
 
     onTransition {
       case _ -> Risk =>
         stateData match {
-          case t@StateData(request, riskStats, backupStats) =>
-            val parameters = request.parameters
+          case StateData(r @ Request(parameters, endTime, till, reportLimit), riskStats, backupStats) =>
 
-            if (request.endTime.getMillis < request.till.getMillis) {
+            if (endTime.getMillis < till.getMillis) {
               parameters.reporter ! Reporter.Fin
               goto(Idle) using Uninitialized
             }
 
-            val (rRisk, estMills) = decideRRiskAndESTTime(request.endTime, request.till, riskStats, parameters)
+            val (rRisk, estMills) = decideRRiskAndESTTime(endTime, till, riskStats, parameters)
 
-            val start = request.endTime.minusHours(rRisk)
+            val start = endTime.minusHours(rRisk)
             val sql = ResponseTime.getAQL(start, rRisk, toOpt(parameters.keyword))
-            runAQuery(sql, DBResultType.RISK, start, request.endTime, rRisk, estMills) pipeTo self
+            runAQuery(sql, DBResultType.RISK, start, endTime, rRisk, estMills) pipeTo self
 
-            val waitingTimeOut = decideWaitTime(rRisk, parameters.reportInterval)
-            setTimer("wait", WaitTimeOut, waitingTimeOut millis)
-            goto(Waiting) using StateDataWithTimeOut(request, waitingTimeOut, false, riskStats, backupStats)
+            val waitingTimeOut = decideWaitTime(backupStats, reportLimit)
+            setTimer(WaitTimerName, WaitTimeOut, waitingTimeOut millis)
+            goto(Waiting) using StateDataWithTimeOut(r, waitingTimeOut, false, riskStats, backupStats)
           case any =>
             workerLog.error(s"WTF state : $any")
-
         }
       case Waiting -> Panic =>
         stateData match {
-          case StateDataWithTimeOut(Request(parameters, endTime, till, reportLimit), waitTimeOut, isPanicTimeOut, riskStats, backupStats) =>
+          case StateDataWithTimeOut(Request(parameters, endTime, till, reportLimit), waitTimeOut, false, riskStats, backupStats) =>
 
-            val panicTimeOut = reportLimit - waitTimeOut - 50
-            val (rBackup, estMills) = decideRBackAndESTTime(endTime, till, panicTimeOut, backupStats, parameters)
+            val panicLimit = reportLimit - waitTimeOut - 50
+            val (rBackup, estMills) = decideRBackAndESTTime(endTime, till, panicLimit, backupStats, parameters)
 
             val start = endTime.minusHours(rBackup)
             val sql = ResponseTime.getAQL(start, rBackup, toOpt(parameters.keyword))
             runAQuery(sql, DBResultType.BACKUP, start, endTime, rBackup, estMills) pipeTo self
 
-            setTimer("panic", PanicTimeOut, panicTimeOut millis)
+            setTimer(PanicTimerName, PanicTimeOut, panicLimit millis)
+          case any =>
+            workerLog.error(s"WTF transition Waiting -> Panic hit unknown stateData: $any")
         }
       case a -> b =>
         workerLog.error(s"WTF state transition from $a to $b")
     }
 
     whenUnhandled {
-      case Event(any, state) =>
-        workerLog.error(s"WTF msg $any, received at state $state")
+      case Event(any, stateData) =>
+        workerLog.error(s"WTF $stateName received msg $any, using data $stateData")
         stay
     }
 
@@ -183,6 +178,8 @@ object ControlBackup extends App with Connection {
   }
 
   object Scheduler {
+    val WaitTimerName = "wait"
+    val PanicTimerName = "panic"
 
     case class Request(parameters: Parameters, endTime: DateTime, till: DateTime, reportLimit: Int)
 
@@ -217,11 +214,11 @@ object ControlBackup extends App with Connection {
     }
 
     def decideWaitTime(backupStats: HistoryStats, reportLimit: Int): Int = {
-      ???
+      500
     }
 
     def decideRBackAndESTTime(endTime: DateTime, till: DateTime, panicTimeOut: Int, backupStats: HistoryStats, parameters: Parameters): RangeAndEstTime = {
-      ???
+      RangeAndEstTime(parameters.minHours, 500)
     }
 
     case object WaitTimeOut
