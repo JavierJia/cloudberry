@@ -5,9 +5,8 @@ import java.util.concurrent.Executors
 
 import akka.actor.ActorSystem
 import akka.stream.ActorMaterializer
-import com.typesafe.config.{Config, ConfigFactory}
-import edu.uci.ics.cloudberry.zion.experiment.Common.QueryStat
-import edu.uci.ics.cloudberry.zion.model.impl.{AQLGenerator, AsterixSQLPPConn, SQLPPGenerator, TwitterDataStore}
+import com.typesafe.config.ConfigFactory
+import edu.uci.ics.cloudberry.zion.model.impl.{AsterixSQLPPConn, SQLPPGenerator, TwitterDataStore}
 import edu.uci.ics.cloudberry.zion.model.schema._
 import org.apache.commons.math3.fitting.WeightedObservedPoints
 import org.asynchttpclient.AsyncHttpClientConfig
@@ -138,21 +137,16 @@ trait Connection {
 
 }
 
-object Common {
-
-  case class QueryStat(targetMS: Int, estSlice: Int, actualMS: Int)
-
-}
-
 object ResponseTime extends App with Connection {
 
+  import Common._
   //  TestExternalSort(gen)
   //  testID
   //  exit()
 
   //    warmUp()
   //  searchBreakdown(gen)
-//    startToEnd()
+  //    startToEnd()
   testAdaptiveShot()
 
 
@@ -356,12 +350,6 @@ object ResponseTime extends App with Connection {
     underEstimates.map(h => (h.targetMS - h.actualMS) * (h.targetMS - h.actualMS)).sum.toDouble / underEstimates.size
   }
 
-  object AlgoType extends Enumeration {
-    type Type = Value
-    val NormalGaussian = Value(1)
-    val Histogram = Value(2)
-    val Baseline = Value(3)
-  }
 
   def estimateInGeneral(limit: Int, alpha: Double, localHistory: List[QueryStat], globalHistory: List[QueryStat], algoType: AlgoType.Type): (Double, Double) = {
     val lastRange = localHistory.last.estSlice
