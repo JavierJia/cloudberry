@@ -81,7 +81,7 @@ object Common {
       case Fin => {
         if (!queue.isEmpty) {
           val all = queue.dequeueAll(_ => true)
-          reportLog.info(s"$keyword report result from ${all.map(_.start).head} of range ${all.map(_.range).sum}")
+          reportLog.info(s"$keyword report result from ${all.map(_.start).last} of range ${all.map(_.range).last}")
           numReports += 1
           sumResult += all.map(_.count).sum
         }

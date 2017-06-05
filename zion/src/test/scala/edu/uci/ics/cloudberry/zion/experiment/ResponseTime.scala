@@ -21,8 +21,8 @@ trait Connection {
 
   val contextId = 1
   implicit val cmp: Ordering[DateTime] = Ordering.by(_.getMillis)
-  val urStartDate = new DateTime(2016, 11, 4, 15, 47)
-  val urEndDate = new DateTime(2017, 1, 17, 6, 16)
+  val urStartDate = new DateTime(2016, 11, 4, 15, 0)
+  val urEndDate = new DateTime(2017, 1, 17, 6, 0)
   //{ "$1": "2017-01-21T07:47:36.000Z", "$2": 119945355 }
   //  val numberLSMs = 965
   val numberLSMs = 267

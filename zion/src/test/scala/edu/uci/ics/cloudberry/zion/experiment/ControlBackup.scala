@@ -64,6 +64,7 @@ object ControlBackup extends App with Connection {
     when(Risk) {
       case Event(FireRisk, StateData(r@Request(parameters, endTime, till, reportLimit), riskStats, backupStats)) =>
 
+        workerLog.info(s"end: $endTime, till: $till")
         if (endTime.getMillis <= till.getMillis) {
           workerLog.info("@Risk DONE")
           parameters.reporter ! Reporter.Fin
@@ -228,7 +229,8 @@ object ControlBackup extends App with Connection {
     case class RangeAndEstTime(riskRange: Int, estMills: Int)
 
     def decideRRiskAndESTTime(endTime: DateTime, till: DateTime, historyStats: HistoryStats, parameters: Parameters): RangeAndEstTime = {
-      RangeAndEstTime(new TInterval(till, endTime).toDuration.getStandardHours.toInt, 50000)
+//      RangeAndEstTime(new TInterval(till, endTime).toDuration.getStandardHours.toInt, 50000)
+       RangeAndEstTime(800, 50000)
     }
 
     def decideWaitTime(backupStats: HistoryStats, reportLimit: Int): Int = {
@@ -257,7 +259,7 @@ object ControlBackup extends App with Connection {
   def process: Unit = {
     import Scheduler._
     val reportInterval = 2000
-    for (keyword <- Seq("")) {
+    for (keyword <- Seq("flood")) {
       val scheduler = system.actorOf(Props(new Scheduler()))
       val reporter = system.actorOf(Props(new Reporter(keyword, reportInterval millis)))
       scheduler ! Request(Parameters(reportInterval, AlgoType.Baseline, 1, reporter, keyword, 1), urEndDate, urStartDate, reportInterval)
