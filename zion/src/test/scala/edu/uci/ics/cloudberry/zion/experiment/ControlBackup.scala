@@ -230,11 +230,21 @@ object ControlBackup extends App with Connection {
 
     def decideRRiskAndESTTime(endTime: DateTime, till: DateTime, historyStats: HistoryStats, parameters: Parameters): RangeAndEstTime = {
 //      RangeAndEstTime(new TInterval(till, endTime).toDuration.getStandardHours.toInt, 50000)
-       RangeAndEstTime(800, 50000)
+       RangeAndEstTime(1900, 50000)
     }
 
     def decideWaitTime(backupStats: HistoryStats, reportLimit: Int): Int = {
-      500
+      val stats = backupStats.history.result()
+      if (stats.size > 3) {
+        val avg = stats.map(_.actualMS).sum / stats.size
+        val variance = stats.map(s => (avg - s.actualMS) * (avg - s.actualMS)).sum / stats.size
+        val o = Math.sqrt(variance)
+        val v = Math.max(1000, reportLimit - (avg + o)).toInt
+        workerLog.info(s"waiting time out is: $v")
+        v
+      } else {
+        1000
+      }
     }
 
     def decideRBackAndESTTime(endTime: DateTime, till: DateTime, panicTimeOut: Int, backupStats: HistoryStats, parameters: Parameters): RangeAndEstTime = {
@@ -259,7 +269,7 @@ object ControlBackup extends App with Connection {
   def process: Unit = {
     import Scheduler._
     val reportInterval = 2000
-    for (keyword <- Seq("flood")) {
+    for (keyword <- Seq("rain")) {
       val scheduler = system.actorOf(Props(new Scheduler()))
       val reporter = system.actorOf(Props(new Reporter(keyword, reportInterval millis)))
       scheduler ! Request(Parameters(reportInterval, AlgoType.Baseline, 1, reporter, keyword, 1), urEndDate, urStartDate, reportInterval)
