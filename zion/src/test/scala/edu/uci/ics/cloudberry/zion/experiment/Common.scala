@@ -48,14 +48,14 @@ object Common {
     var numReports = 0
     var numFailed = 0
     var delayed = 0l
-    var sumResult = 0
+    val sumResultBuilder = Seq.newBuilder[Int]
 
     def hungry(since: DateTime): Actor.Receive = {
       case r: OneShot =>
         val delay = new TInterval(since, DateTime.now())
         delayed += delay.toDurationMillis
-        sumResult += r.count
-        reportLog.info(s"$keyword delayed ${delay.toDurationMillis / 1000.0}")
+        sumResultBuilder += r.count
+        reportLog.info(s"$keyword delayed ${delay.toDurationMillis / 1000.0}, range ${r.range}, count: ${r.count}")
         schedule = context.system.scheduler.schedule(limit, limit, self, Report)
         context.unbecome()
       case Report =>
@@ -73,23 +73,30 @@ object Common {
           numFailed += 1
         } else {
           val result = queue.dequeue()
-          sumResult += result.count
-          reportLog.info(s"$keyword report result from ${result.start} of range ${result.range}")
+          sumResultBuilder += result.count
+          reportLog.info(s"$keyword report result from ${result.start} of range ${result.range}, count ${result.count}")
         }
         numReports += 1
       }
       case Fin => {
         if (!queue.isEmpty) {
           val all = queue.dequeueAll(_ => true)
-          reportLog.info(s"$keyword report result from ${all.map(_.start).last} of range ${all.map(_.range).last}")
+          val sum = all.map(_.count).sum
+          reportLog.info(s"$keyword report result from ${all.map(_.start).last} of range ${all.map(_.range).last}, count ${sum}")
           numReports += 1
-          sumResult += all.map(_.count).sum
+          sumResultBuilder += sum
         }
         val totalTime = DateTime.now().getMillis - startTime.getMillis
-        reportLog.info(s"$keyword numOfReports: $numReports, sumTime: ${totalTime / 1000.0}, numOfFail: $numFailed, sumDelay: ${delayed / 1000.0}, sumCount:$sumResult")
+        val sumResult = sumResultBuilder.result()
+        val avg = sumResult.sum / sumResult.size.toDouble
+        val variance = sumResult.map( c => (c-avg)*(c-avg)).sum / sumResult.size
+        val o = Math.sqrt(variance)
+        reportLog.info(s"$keyword numOfReports: $numReports, sumTime: ${totalTime / 1000.0}, numOfFail: $numFailed, sumDelay: ${delayed / 1000.0}, sumCount:${sumResult.sum}, countVar: $variance, std:$o")
         reportLog.info(s"=============FIN===============")
         self ! PoisonPill
       }
+      case any =>
+        reportLog.error(s"unknown msg: $any")
     }
   }
 

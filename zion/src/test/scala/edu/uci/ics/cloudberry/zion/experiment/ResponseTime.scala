@@ -27,7 +27,8 @@ trait Connection {
   //  val numberLSMs = 965
   val numberLSMs = 267
   val timeRange: Double = 1572.0
-  val unit = new Duration(urStartDate, urEndDate).dividedBy(numberLSMs).getStandardHours
+//  val unit = new Duration(urStartDate, urEndDate).dividedBy(numberLSMs).getStandardHours
+  val unit = 1
 
   //  val keywords = Seq("zika", "flood", "election", "clinton", "trump", "happy", "")
   val keywords = Seq("zika", "flood", "rain", "election", "clinton", "trump", "")
@@ -346,7 +347,7 @@ object ResponseTime extends App with Connection {
   }
 
   def calcVariance(history: List[QueryStat]): Double = {
-    history.takeRight(history.size - 3).map(h => (h.targetMS - h.actualMS) * (h.targetMS - h.actualMS)).sum.toDouble / history.size
+//    history.takeRight(history.size - 3).map(h => (h.targetMS - h.actualMS) * (h.targetMS - h.actualMS)).sum.toDouble / history.size
     val underEstimates = history.filter(h => h.targetMS < h.actualMS)
     underEstimates.map(h => (h.targetMS - h.actualMS) * (h.targetMS - h.actualMS)).sum.toDouble / underEstimates.size
   }
@@ -369,7 +370,7 @@ object ResponseTime extends App with Connection {
 
     val closeRange = Math.max(1, Math.min(nextRange.toInt, lastRange * 2))
     if (localHistory.size < 3) {
-      (closeRange, limit)
+      (closeRange, Double.MaxValue)
     } else {
       val variance = calcVariance(globalHistory)
       if (variance < 0.0000001) {
