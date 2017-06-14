@@ -19,13 +19,62 @@ angular.module('cloudberry.util', ['rzModule', 'cloudberry.common'])
       $scope.search();
       $scope.updateSearchBox(keyword);
     };
-    $scope.intervalSlider = {
-      value : 155,
-      options: {
-        floor: 0,
-        ceil: 500
-      }
+    $scope.interval = {
+              value : 24,
+              options: {
+                floor: 1,
+                ceil: 1600,
+                translate: function(num) {
+                  return num + 'h';
+                }
+              }
     };
+    $scope.modeType = {
+      equalResult : "equal-result",
+      equalResponse: "equal-response",
+      minBackup : "min-backups"
+    };
+    $scope.mode = $scope.modeType.equalResult;
+    $scope.$on("slideEnded", function() {
+      //TODO send the continue with a different interval query
+      console.warn("value:", $scope.interval.value);
+    });
+    $scope.$watch(
+        function () {
+           return $scope.mode;
+        },
+        function (newMode) {
+          if (newMode === $scope.modeType.equalResult) {
+            $scope.interval = {
+              value : 24,
+              options: {
+                floor: 1,
+                ceil: 1600,
+                translate: function(num) {
+                  return num + 'h';
+                }
+              }
+            }
+          } else if (newMode === $scope.modeType.equalResponse) {
+            $scope.interval = {
+              value : 2,
+              options: {
+                floor: 2,
+                ceil: 10,
+                translate: function(num) {
+                  return num + 'sec';
+                }
+              }
+            }
+          } else if (newMode === $scope.modeType.minBackup) {
+            $scope.interval = {
+              options : {
+               disable: true
+              }
+            }
+          }
+        }
+    );
   })
   .directive('searchBar', function (cloudberryConfig) {
     if(cloudberryConfig.removeSearchBar) {
@@ -47,16 +96,27 @@ angular.module('cloudberry.util', ['rzModule', 'cloudberry.common'])
         controller: "SearchCtrl",
         template: [
           '<form class="form-inline" id="input-form" ng-submit="search()" >',
+            '<label>',
+            '<input type="radio" ng-model="mode" ng-value="modeType.equalResult">',
+              '  Equal Result Size  ',
+            '</label>',
+            '<label>',
+            '<input type="radio" ng-model="mode" ng-value="modeType.equalResponse">',
+              '  Equal Response Time  ',
+            '</label>',
+            '<label>',
+            '<input type="radio" ng-model="mode" ng-value="modeType.minBackup">',
+              '  One Main and Many Backups',
+            '</label><br/>',
+            '<div>',
+            '<rzslider rz-slider-model="interval.value" rz-slider-options="interval.options"></rzslider>',
+            '</div>',
             '<div class="input-group col-lg-12">',
               '<label class="sr-only">Keywords</label>',
               '<input type="text" style="width: 97%" class="form-control " id="keyword-textbox" placeholder="Search keywords, e.g. zika" ng-model="keyword" required/>',
               '<span class="input-group-btn">',
                 '<button type="submit" class="btn btn-primary" id="submit-button">Submit</button>',
               '</span>',
-            '</div>',
-            '<div>',
-            '<p>Interval : {{intervalSlider.value}}</p>',
-            '<rzslider rz-slider-model="intervalSlider.value" rz-slider-options="intervalSlider.options"></rzslider>',
             '</div>',
           '</form>'
         ].join('')
