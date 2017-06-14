@@ -1,14 +1,19 @@
 angular.module('cloudberry.util', ['rzModule', 'cloudberry.common'])
   .controller('SearchCtrl', function($scope, $window, cloudberry, cloudberryConfig) {
     $scope.search = function() {
+      var type = $scope.mode;
+      var interval = $scope.interval.value;
+      var keywords = [];
       if ($scope.keyword && $scope.keyword.trim().length > 0) {
-        cloudberry.parameters.keywords = $scope.keyword.trim().split(/\s+/);
-        // skip the empty query for now.
-        cloudberry.queryType = 'search';
-        cloudberry.query(cloudberry.parameters, cloudberry.queryType);
-      } else {
-        cloudberry.parameters.keywords = [];
+        keywords = $scope.keyword.trim().split(/\s+/);
       }
+
+      var parameters = {
+        type: type,
+        interval: interval,
+        keywords: keywords
+      };
+      cloudberry.query(parameters);
     };
     $scope.predefinedKeywords = cloudberryConfig.predefinedKeywords;
     $scope.updateSearchBox = function (keyword) {
@@ -36,8 +41,7 @@ angular.module('cloudberry.util', ['rzModule', 'cloudberry.common'])
     };
     $scope.mode = $scope.modeType.equalResult;
     $scope.$on("slideEnded", function() {
-      //TODO send the continue with a different interval query
-      console.warn("value:", $scope.interval.value);
+        cloudberry.updateInterval($scope.mode, $scope.interval.value);
     });
     $scope.$watch(
         function () {

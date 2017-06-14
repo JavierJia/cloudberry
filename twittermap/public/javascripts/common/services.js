@@ -258,37 +258,25 @@ angular.module('cloudberry.common', [])
       hashTagResult: [],
       errorMessage: null,
 
-      query: function(parameters, queryType) {
-        var sampleJson = (JSON.stringify({
-          dataset: parameters.dataset,
-          filter: getFilter(parameters, defaultSamplingDayRange),
-          select: {
-            order: ["-create_at"],
-            limit: defaultSamplingSize,
-            offset: 0,
-            field: ["create_at", "id", "user.id"]
-          },
-          transform: {
-            wrap: {
-              key: "sample"
-            }
-          }
-        }));
+      query: function(parameters) {
+        var json = JSON.stringify({
+            key: "request",
+            type: parameters.type,
+            interval: parameters.interval,
+            keywords: parameters.keywords
+        });
+        console.log("query:", json);
+        ws.send(json);
+      },
 
-        var batchJson = (JSON.stringify({
-          batch: [byTimeRequest(parameters), byGeoRequest(parameters), byHashTagRequest(parameters)],
-          option: {
-            sliceMillis: 2000
-          },
-          transform: {
-            wrap: {
-              key: "batch"
-            }
-          }
-        }));
-
-        ws.send(sampleJson);
-        ws.send(batchJson);
+      updateInterval: function(newType, newInterval) {
+        var json = JSON.stringify({
+                key: "update",
+                type: newType,
+                interval: newInterval
+        });
+        console.log("update:", newType, newInterval);
+        ws.send(json);
       }
     };
 
