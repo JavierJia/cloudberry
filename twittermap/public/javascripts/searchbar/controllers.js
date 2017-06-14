@@ -1,4 +1,4 @@
-angular.module('cloudberry.util', ['cloudberry.common'])
+angular.module('cloudberry.util', ['rzModule', 'cloudberry.common'])
   .controller('SearchCtrl', function($scope, $window, cloudberry, cloudberryConfig) {
     $scope.search = function() {
       if ($scope.keyword && $scope.keyword.trim().length > 0) {
@@ -13,11 +13,18 @@ angular.module('cloudberry.util', ['cloudberry.common'])
     $scope.predefinedKeywords = cloudberryConfig.predefinedKeywords;
     $scope.updateSearchBox = function (keyword) {
       $('.search-keyword-btn').html(keyword + ' <span class="caret"></span>');
-    }
+    };
     $scope.predefinedSearch = function (keyword) {
       $scope.keyword = keyword;
       $scope.search();
       $scope.updateSearchBox(keyword);
+    };
+    $scope.intervalSlider = {
+      value : 155,
+      options: {
+        floor: 0,
+        ceil: 500
+      }
     };
   })
   .directive('searchBar', function (cloudberryConfig) {
@@ -47,6 +54,10 @@ angular.module('cloudberry.util', ['cloudberry.common'])
                 '<button type="submit" class="btn btn-primary" id="submit-button">Submit</button>',
               '</span>',
             '</div>',
+            '<div>',
+            '<p>Interval : {{intervalSlider.value}}</p>',
+            '<rzslider rz-slider-model="intervalSlider.value" rz-slider-options="intervalSlider.options"></rzslider>',
+            '</div>',
           '</form>'
         ].join('')
       };
@@ -57,7 +68,7 @@ angular.module('cloudberry.util', ['cloudberry.common'])
       function() {
         return cloudberry.errorMessage;
       },
-  
+
       function(newMsg) {
         if (newMsg) $window.alert(newMsg);
         cloudberry.errorMessage = null;

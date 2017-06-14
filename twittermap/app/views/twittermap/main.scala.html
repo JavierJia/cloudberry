@@ -17,6 +17,7 @@
   <link rel="stylesheet" media="screen" href='@routes.Assets.versioned("lib/font-awesome/css/font-awesome.min.css")'>
   <link rel="stylesheet" media="screen" href='@routes.Assets.versioned("lib/bootstrap-vertical-tabs/bootstrap.vertical-tabs.min.css")'>
   <link rel="stylesheet" media="screen" href='@routes.Assets.versioned("lib/bootstrap-toggle/css/bootstrap-toggle.min.css")'>
+  <link rel="stylesheet" href='https://rawgit.com/rzajac/angularjs-slider/master/dist/rzslider.css'>
   <link rel='stylesheet' href='@routes.Assets.versioned("stylesheets/main.css")'>
 
   <script>
@@ -28,7 +29,9 @@
       predefinedKeywords: @Html(Json.stringify(Json.toJson(predefinedKeywords)))
     }
   </script>
+
   <script src='@routes.Assets.versioned("lib/angularjs/angular.min.js")'></script>
+  <script src="https://rawgit.com/rzajac/angularjs-slider/master/dist/rzslider.js"></script>
   <script src='@routes.Assets.versioned("lib/json-bigint/dist/json-bigint.js")'></script>
   <script src='@routes.Assets.versioned("lib/leaflet/leaflet.js")'></script>
   <script src='@routes.Assets.versioned("lib/angular-leaflet-directive/angular-leaflet-directive.js")'></script>
