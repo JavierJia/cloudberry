@@ -6,7 +6,7 @@ import java.util.concurrent.Executors
 import akka.actor.ActorSystem
 import akka.stream.ActorMaterializer
 import com.typesafe.config.ConfigFactory
-import edu.uci.ics.cloudberry.zion.model.impl.{AsterixSQLPPConn, SQLPPGenerator, TwitterDataStore}
+import edu.uci.ics.cloudberry.zion.model.impl.{AsterixSQLPPConn, SQLPPGenerator}
 import edu.uci.ics.cloudberry.zion.model.schema._
 import org.apache.commons.math3.fitting.WeightedObservedPoints
 import org.asynchttpclient.AsyncHttpClientConfig
@@ -443,10 +443,11 @@ object ResponseTime extends App with Connection {
     val timeFilter = FilterStatement(TimeField("create_at"), None, Relation.inRange,
       Seq(TimeField.TimeFormat.print(start),
         TimeField.TimeFormat.print(start.plusHours(rangeInHour))))
-    //    val byHour = ByStatement(TimeField("create_at"), Some(Interval(TimeUnit.Minute, 10 * rangeInHour)), Some(NumberField("hour")))
-    //    val groupStatement = GroupStatement(Seq(byHour), Seq(aggrCount))
-    //      val query = Query(dataset = "twitter.ds_tweet", filter = Seq(timeFilter), groups = Some(groupStatement))
-    val query = Query(dataset = "twitter.ds_tweet", filter = keywordFilter.map(Seq(timeFilter, _)).getOrElse(Seq(timeFilter)), globalAggr = Some(globalAggr))
+    val filters = keywordFilter.map(Seq(timeFilter, _)).getOrElse(Seq(timeFilter))
+    val byDay = ByStatement(TimeField("create_at"), Some(Interval(TimeUnit.Day)), Some(NumberField("day")))
+    val groupStatement = GroupStatement(Seq(byDay), Seq(aggrCount))
+    val query = Query(dataset = "twitter.ds_tweet", filter = filters, groups = Some(groupStatement))
+//    val query = Query(dataset = "twitter.ds_tweet", filter = filters, globalAggr = Some(globalAggr))
     queryGen.generate(query, Map(TwitterDataStore.DatasetName -> TwitterDataStore.TwitterSchema))
   }
 

@@ -130,7 +130,7 @@ angular.module('cloudberry.timeseries', ['cloudberry.common'])
             });
 
             var minDate = cloudberry.startDate;
-            var maxDate = new Date();
+            var maxDate = new Date(2017, 0, 17);
             chart.selectAll('a').remove();
             chart.append('a')
                 .text('Reset')

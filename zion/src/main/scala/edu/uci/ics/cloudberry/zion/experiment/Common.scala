@@ -4,6 +4,7 @@ import akka.actor.{Actor, ActorRef, PoisonPill}
 import edu.uci.ics.cloudberry.zion.TInterval
 import org.joda.time.DateTime
 import play.api.Logger
+import play.api.libs.json.{JsArray, JsValue}
 
 import scala.collection.mutable
 import scala.concurrent.ExecutionContext
@@ -15,13 +16,15 @@ object Common {
 
   case class QueryStat(targetMS: Int, estSlice: Int, actualMS: Int)
 
-  case class ResultFromDB(mills: Long, sum: Int)
+  case class ResultFromDB(mills: Long, sum: Int, json: JsValue)
 
   object AlgoType extends Enumeration {
     type Type = Value
     val NormalGaussian = Value(1)
     val Histogram = Value(2)
     val Baseline = Value(3)
+    // I am lazy
+//    val EqualResultWidth = Value(4)
   }
 
   case class Parameters(reportInterval: Int,
@@ -34,7 +37,7 @@ object Common {
   case class HistoryStats(history: mutable.Builder[Common.QueryStat, List[Common.QueryStat]],
                           fullHistory: mutable.Builder[Common.QueryStat, List[Common.QueryStat]])
 
-  class Reporter(keyword: String, limit: FiniteDuration)(implicit val ec : ExecutionContext) extends Actor {
+  class Reporter(keyword: String, limit: FiniteDuration, outOpt: Option[ActorRef]= None)(implicit val ec : ExecutionContext) extends Actor {
 
     import Reporter._
 
@@ -49,12 +52,15 @@ object Common {
     var numFailed = 0
     var delayed = 0l
     val sumResultBuilder = Seq.newBuilder[Int]
+    var json = JsArray(Seq.empty)
 
     def hungry(since: DateTime): Actor.Receive = {
       case r: OneShot =>
         val delay = new TInterval(since, DateTime.now())
         delayed += delay.toDurationMillis
         sumResultBuilder += r.count
+        json = json ++ r.json.asInstanceOf[JsArray]
+        outOpt.map(_ ! json)
         reportLog.info(s"$keyword delayed ${delay.toDurationMillis / 1000.0}, range ${r.range}, count: ${r.count}")
         schedule = context.system.scheduler.schedule(limit, limit, self, Report)
         context.unbecome()
@@ -74,17 +80,21 @@ object Common {
         } else {
           val result = queue.dequeue()
           sumResultBuilder += result.count
+          json = json ++ result.json.asInstanceOf[JsArray]
+          outOpt.map(_ ! json)
           reportLog.info(s"$keyword report result from ${result.start} of range ${result.range}, count ${result.count}")
         }
         numReports += 1
       }
       case Fin => {
-        if (!queue.isEmpty) {
+        if (queue.nonEmpty) {
           val all = queue.dequeueAll(_ => true)
           val sum = all.map(_.count).sum
           reportLog.info(s"$keyword report result from ${all.map(_.start).last} of range ${all.map(_.range).last}, count ${sum}")
           numReports += 1
           sumResultBuilder += sum
+          json = json ++ all.map(_.json.asInstanceOf[JsArray]).reduce((l,s) => l ++ s)
+          outOpt.map(_ ! json)
         }
         val totalTime = DateTime.now().getMillis - startTime.getMillis
         val sumResult = sumResultBuilder.result()
@@ -102,7 +112,7 @@ object Common {
 
   object Reporter {
 
-    case class OneShot(start: DateTime, range: Int, count: Int)
+    case class OneShot(start: DateTime, range: Int, count: Int, json: JsValue)
 
     case object Fin
 

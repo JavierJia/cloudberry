@@ -1,7 +1,7 @@
 package edu.uci.ics.cloudberry.zion.experiment
 
 import edu.uci.ics.cloudberry.zion.experiment.ResponseTime.{adbConn, queryGen, multipleTime, urEndDate, urStartDate}
-import edu.uci.ics.cloudberry.zion.model.impl.{AQLGenerator, TwitterDataStore}
+import edu.uci.ics.cloudberry.zion.model.impl.{AQLGenerator}
 import edu.uci.ics.cloudberry.zion.model.schema.TimeField.TimeFormat
 import edu.uci.ics.cloudberry.zion.model.schema._
 import org.joda.time.{DateTime, Duration}

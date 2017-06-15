@@ -6,6 +6,7 @@ import akka.util.Timeout
 import edu.uci.ics.cloudberry.zion.TInterval
 import edu.uci.ics.cloudberry.zion.experiment.Common.AlgoType
 import org.joda.time.DateTime
+import play.api.libs.json.JsValue
 
 import scala.concurrent.{Await, Future}
 import scala.concurrent.duration._
@@ -27,7 +28,7 @@ object ControlBackup extends App with Connection {
     adbConn.postQuery(query).map { ret =>
       val duration = DateTime.now.getMillis - start.getMillis
       val sum = (ret \\ "count").map(_.as[Int]).sum
-      LabeledDBResult(label, new TInterval(from, to), range, estMills, ResultFromDB(duration, sum))
+      LabeledDBResult(label, new TInterval(from, to), range, estMills, ResultFromDB(duration, sum, ret))
     }
   }
 
@@ -74,7 +75,7 @@ object ControlBackup extends App with Connection {
         } else {
 
           sumRisk += 1
-          workerLog.info("@Risk fire risk query")
+          workerLog.info(s"@Risk fire risk query, report limit: $reportLimit")
           val waitingTimeOut = decideWaitTime(backupStats, reportLimit)
           val RangeAndEstTime(rRisk, estMills) = decideRRiskAndESTTime(endTime, till, waitingTimeOut, riskStats, parameters)
 
@@ -91,7 +92,7 @@ object ControlBackup extends App with Connection {
       case Event(r@LabeledDBResult(DBResultType.RISK, interval, range, estMills, result), StateDataWithTimeOut(request, waitTimeOut, _, riskStats, backupStats)) =>
         workerLog.info(s"@Waiting, receive response $r")
         val start = interval.getStart
-        reportRiskSubAccBackup(request.parameters.reporter , start, range, result.sum)
+        reportRiskSubAccBackup(request.parameters.reporter , start, range, result.sum, result.json)
         learnQueryState(start, range, Some(estMills), result.mills, riskStats)
 
         cancelTimer(WaitTimerName)
@@ -107,13 +108,14 @@ object ControlBackup extends App with Connection {
 
     def cancelBackupQuery(): Unit = {}
 
-    def reportRiskSubAccBackup(reporter: ActorRef, start: DateTime, range: Int, sum: Int): Unit = {
+    def reportRiskSubAccBackup(reporter: ActorRef, start: DateTime, range: Int, sum: Int, json: JsValue): Unit = {
       if(accBackup.isClear()) {
-        reporter ! Reporter.OneShot(start, range, sum)
+        reporter ! Reporter.OneShot(start, range, sum, json)
       } else {
         assert(accBackup.to.minusHours(range) == start )
         assert(start.isBefore(accBackup.from))
-        reporter ! Reporter.OneShot(start, new TInterval(start, accBackup.from).toDuration.getStandardHours.toInt, sum - accBackup.count)
+        //FIXME
+        reporter ! Reporter.OneShot(start, new TInterval(start, accBackup.from).toDuration.getStandardHours.toInt, sum - accBackup.count, json)
         accBackup.reset()
       }
     }
@@ -138,7 +140,7 @@ object ControlBackup extends App with Connection {
           case ss: StateDataWithTimeOut => ss
           case ss: StateDataWithBackupResult => ss.stateDataWithTimeOut
         }
-        reportRiskSubAccBackup( data.request.parameters.reporter, start, range, result.sum)
+        reportRiskSubAccBackup( data.request.parameters.reporter, start, range, result.sum, result.json)
         learnQueryState(start, range, Some(estMills), result.mills, data.riskStats)
 
         cancelBackupQuery()
@@ -148,6 +150,7 @@ object ControlBackup extends App with Connection {
         } else {
           data.request.parameters.reportInterval + data.request.reportLimit - result.mills
         }
+        workerLog.info(s"${data.request.parameters.reportInterval}, ${data.request.reportLimit}, ${result.mills} ")
         goto(Risk) using StateData(data.request.copy(endTime = start, reportLimit = nextLimit.toInt), data.riskStats, data.backupStats)
 
       case Event(r @ LabeledDBResult(DBResultType.BACKUP, interval, range, estMills, result), s@StateDataWithTimeOut(request, waitTimeOut, isPanicTimeOut, riskStats, backupStats)) =>
@@ -183,7 +186,7 @@ object ControlBackup extends App with Connection {
     def reportBackup(reporter: ActorRef, dbResult: LabeledDBResult, backupStats: HistoryStats, nextLimit: Int): Int = {
       val start = dbResult.interval.getStart
       val range = dbResult.range
-      reporter ! Reporter.OneShot(start, range, dbResult.result.sum)
+      reporter ! Reporter.OneShot(start, range, dbResult.result.sum, dbResult.result.json)
       learnQueryState(start, range, Some(dbResult.estMills), dbResult.result.mills, backupStats)
 
       accBackup.acc(start, dbResult.interval.getEnd, dbResult.result.sum)
@@ -287,7 +290,7 @@ object ControlBackup extends App with Connection {
         if (historyStats.history.result().isEmpty) {
           RangeAndEstTime(parameters.minHours, Int.MaxValue)
         } else {
-          val (range, estTime) = ResponseTime.estimateInGeneral(limit, alpha, historyStats.history.result(), historyStats.fullHistory.result(), estModel)
+          val (range, estTime) = ResponseTime.estimateInGeneral(limit, alpha, historyStats.history.result(), historyStats.fullHistory.result(), parameters.algo)
           RangeAndEstTime(range.toInt, estTime.toInt)
         }
       }
@@ -333,7 +336,6 @@ object ControlBackup extends App with Connection {
 
   val oneRisk = false
   val withBackup = false
-  val estModel = AlgoType.NormalGaussian
   val alpha = 1
 
   def process: Unit = {

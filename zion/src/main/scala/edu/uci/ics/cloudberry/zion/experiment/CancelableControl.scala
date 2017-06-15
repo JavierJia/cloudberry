@@ -29,7 +29,7 @@ object CancelableControl extends App with Connection {
     adbConn.postQuery(query, Some(contextID)).map { ret =>
       val duration = DateTime.now.getMillis - start.getMillis
       val sum = (ret \\ "count").map(_.as[Int]).sum
-      ResultFromDB(duration, sum)
+      ResultFromDB(duration, sum, ret)
     }
   }
 
@@ -56,7 +56,7 @@ object CancelableControl extends App with Connection {
     val f = runAQuery(query, QueryIDNormal)
     // we have to wait no matter how slow it it
     val retMin = Await.result(f, scala.concurrent.duration.Duration.Inf)
-    parameters.reporter ! OneShot(start, parameters.minHours, retMin.sum)
+    parameters.reporter ! OneShot(start, parameters.minHours, retMin.sum, retMin.json)
 
     workerLog.info(s"FirstMin: ${parameters.algo},${parameters.alpha},$start,${parameters.minHours},${parameters.keyword},${curDeadline},MIN,${retMin.mills},${retMin.sum}")
     learnQueryState(start, parameters.minHours, None, retMin.mills, state)
@@ -82,7 +82,7 @@ object CancelableControl extends App with Connection {
     val fAdv = runAQuery(queryAdventure, QueryIDADV)
     try {
       val retAdv = Await.result(fAdv, FiniteDuration(target, TimeUnit.MILLISECONDS))
-      parameters.reporter ! OneShot(startAdventure, adventureRange.toInt, retAdv.sum)
+      parameters.reporter ! OneShot(startAdventure, adventureRange.toInt, retAdv.sum, retAdv.json)
 
       workerLog.info(s"Advnture: ${parameters.algo},${parameters.alpha},$startAdventure,${adventureRange.toInt},${parameters.keyword},${target},${estTarget.toInt},${retAdv.mills},${retAdv.sum}")
 
@@ -99,7 +99,7 @@ object CancelableControl extends App with Connection {
         val fMakeup = runAQuery(makeupQuery, QueryIDNormal)
         // we have to wait no matter how slow it it
         val retMakeup = Await.result(fMakeup, scala.concurrent.duration.Duration.Inf)
-        parameters.reporter ! OneShot(startMakeUp, parameters.minHours, retMakeup.sum)
+        parameters.reporter ! OneShot(startMakeUp, parameters.minHours, retMakeup.sum, retMakeup.json)
 
         learnQueryState(startMakeUp, parameters.minHours, Some(retMin.mills), retMakeup.mills, state)
 

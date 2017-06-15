@@ -2,7 +2,7 @@ package controllers
 
 import javax.inject.{Inject, Singleton}
 
-import actor.RequestRouter
+import actor.{ExperimentActor, RequestRouter}
 import akka.actor._
 import akka.pattern.ask
 import akka.stream.scaladsl.{Flow, Keep, Sink, Source}
@@ -82,6 +82,12 @@ class Cloudberry @Inject()(val wsClient: WSClient,
   def ws = WebSocket.accept[JsValue, JsValue] { request =>
     ActorFlow.actorRef { out =>
       RequestRouter.props(BerryClient.props(new JSONParser(), manager, new QueryPlanner(), config, out), config, request)
+    }
+  }
+
+  def ws2 = WebSocket.accept[JsValue, JsValue] { request =>
+    ActorFlow.actorRef { out =>
+      ExperimentActor.props(out)
     }
   }
 

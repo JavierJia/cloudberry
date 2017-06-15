@@ -6,6 +6,7 @@ import akka.actor.{ActorRef, Props}
 import edu.uci.ics.cloudberry.zion.experiment.Common.Reporter.{Fin, OneShot}
 import edu.uci.ics.cloudberry.zion.experiment.ResponseTime.{estimateInGeneral, getAQL}
 import org.joda.time.DateTime
+import play.api.libs.json.JsArray
 
 import scala.collection.mutable
 import scala.concurrent.duration.FiniteDuration
@@ -66,7 +67,7 @@ object Control extends App with Connection {
     val start = endTime.minusHours(range)
     val aql = getAQL(start, range, if (keyword.length > 0) Some(keyword) else None)
     val (runTime, _, count) = multipleTime(0, aql)
-    reporter ! OneShot(start, range, count)
+    reporter ! OneShot(start, range, count, JsArray(Seq.empty))
 
     history += QueryStat(target, range, runTime.toInt)
     fullHistory += QueryStat(target, range, runTime.toInt)

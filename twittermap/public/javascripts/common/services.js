@@ -40,7 +40,7 @@ angular.module('cloudberry.common', [])
     };
   })
   .service('cloudberry', function($http, $timeout, $location, cloudberryConfig) {
-    var startDate = new Date(2015, 10, 22, 0, 0, 0, 0);
+    var startDate = new Date(2016, 10, 4, 0, 0, 0, 0);
     var defaultNonSamplingDayRange = 1500;
     var defaultSamplingDayRange = 1;
     var defaultSamplingSize = 10;
@@ -69,7 +69,7 @@ angular.module('cloudberry.common', [])
         ws.send(countRequest);
       }
     }
-    setInterval(requestLiveCounts, 1000);
+    // setInterval(requestLiveCounts, 1000);
 
     function getLevel(level){
       switch(level){
@@ -283,29 +283,30 @@ angular.module('cloudberry.common', [])
     ws.onmessage = function(event) {
       $timeout(function() {
         var result = JSONbig.parse(event.data);
-        switch (result.key) {
-          case "sample":
-            cloudberryService.tweetResult = result.value[0];
-            break;
-          case "batch":
-            cloudberryService.timeResult = result.value[0];
-            cloudberryService.mapResult = result.value[1];
-            cloudberryService.hashTagResult = result.value[2];
-            break;
-          case "totalCount":
-            cloudberryService.totalCount = result.value[0][0].count;
-            break;
-          case "error":
-            console.error(result);
-            cloudberryService.errorMessage = result.value;
-            break;
-          case "done":
-            break;
-          default:
-            console.error("ws get unknown data: ", result);
-            cloudberryService.errorMessage = "ws get unknown data: " + result.toString();
-            break;
-        }
+        cloudberryService.timeResult = result;
+        // switch (result.key) {
+        //   case "sample":
+        //     cloudberryService.tweetResult = result.value[0];
+        //     break;
+        //   case "batch":
+        //     cloudberryService.timeResult = result.value[0];
+        //     cloudberryService.mapResult = result.value[1];
+        //     cloudberryService.hashTagResult = result.value[2];
+        //     break;
+        //   case "totalCount":
+        //     cloudberryService.totalCount = result.value[0][0].count;
+        //     break;
+        //   case "error":
+        //     console.error(result);
+        //     cloudberryService.errorMessage = result.value;
+        //     break;
+        //   case "done":
+        //     break;
+        //   default:
+        //     console.error("ws get unknown data: ", result);
+        //     cloudberryService.errorMessage = "ws get unknown data: " + result.toString();
+        //     break;
+        // }
       });
     };
 
