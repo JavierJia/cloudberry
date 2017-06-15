@@ -639,6 +639,10 @@ angular.module('cloudberry.map', ['leaflet-directive', 'cloudberry.common'])
 
     }
 
+    function preProcessingData(mapResult) {
+      return mapResult;
+    }
+
     $scope.$watchCollection(
       function() {
         return {
@@ -651,7 +655,7 @@ angular.module('cloudberry.map', ['leaflet-directive', 'cloudberry.common'])
 
       function(newResult, oldValue) {
         if (newResult['mapResult'] !== oldValue['mapResult']) {
-          $scope.result = newResult['mapResult'];
+          $scope.result = preProcessingData(newResult['mapResult']);
           if (Object.keys($scope.result).length !== 0) {
             $scope.status.init = false;
             drawMap($scope.result);
