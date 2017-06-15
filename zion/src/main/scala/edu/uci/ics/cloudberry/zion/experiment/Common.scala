@@ -33,7 +33,9 @@ object Common {
                         reporter: ActorRef,
                         keyword: String,
                         minHours: Int,
-                        width: Int = 0
+                        width: Int = 0,
+                        withBackup : Boolean = false,
+                        useOneMain: Boolean = false
                        )
 
   case class HistoryStats(history: mutable.Builder[Common.QueryStat, List[Common.QueryStat]],

@@ -44,7 +44,9 @@ class ExperimentActor(out: ActorRef)(implicit ec: ExecutionContext, implicit val
               curReporter = Some(reporter)
               scheduler ! Request(Parameters(reportInterval * 1000, AlgoType.NormalGaussian, 1, reporter, keyword, 1), urEndDate, urStartDate, reportInterval * 1000)
             case t if t == minBackup =>
-              ???
+              val reporter = context.actorOf(Props(new Reporter(keyword, reportInterval seconds, Some(out))))
+              curReporter = Some(reporter)
+              scheduler ! Request(Parameters(reportInterval * 1000, AlgoType.NormalGaussian, 1, reporter, keyword, 1, withBackup = true, useOneMain = true), urEndDate, urStartDate, reportInterval * 1000)
           }
         case s if s == keyUpdate =>
           (json \ "type").as[String] match {

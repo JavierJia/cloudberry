@@ -24,7 +24,8 @@ angular.module('cloudberry.util', ['rzModule', 'cloudberry.common'])
       $scope.search();
       $scope.updateSearchBox(keyword);
     };
-    $scope.interval = {
+
+    var defaultInterval = {
               value : 24,
               options: {
                 floor: 1,
@@ -35,6 +36,17 @@ angular.module('cloudberry.util', ['rzModule', 'cloudberry.common'])
                 }
               }
     };
+    var defaultTimeInterval = {
+              value : 2,
+              options: {
+                floor: 2,
+                ceil: 10,
+                translate: function(num) {
+                  return num + 'sec';
+                }
+              }
+            };
+    $scope.interval = defaultInterval;
     $scope.modeType = {
       equalResult : "equal-result",
       equalResponse: "equal-response",
@@ -50,34 +62,11 @@ angular.module('cloudberry.util', ['rzModule', 'cloudberry.common'])
         },
         function (newMode) {
           if (newMode === $scope.modeType.equalResult) {
-            $scope.interval = {
-              value : 24,
-              options: {
-                floor: 1,
-                ceil: 1600,
-                logScale: true,
-                translate: function(num) {
-                  return num + 'h';
-                }
-              }
-            }
+            $scope.interval = defaultInterval;
           } else if (newMode === $scope.modeType.equalResponse) {
-            $scope.interval = {
-              value : 2,
-              options: {
-                floor: 2,
-                ceil: 10,
-                translate: function(num) {
-                  return num + 'sec';
-                }
-              }
-            }
+            $scope.interval = defaultTimeInterval;
           } else if (newMode === $scope.modeType.minBackup) {
-            $scope.interval = {
-              options : {
-               disable: true
-              }
-            }
+            $scope.interval = defaultTimeInterval;
           }
         }
     );
