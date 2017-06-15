@@ -283,6 +283,7 @@ angular.module('cloudberry.common', [])
     ws.onmessage = function(event) {
       $timeout(function() {
         var result = JSONbig.parse(event.data);
+        console.log(result);
         cloudberryService.timeResult = result;
         // switch (result.key) {
         //   case "sample":

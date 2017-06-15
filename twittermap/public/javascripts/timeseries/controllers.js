@@ -108,7 +108,7 @@ angular.module('cloudberry.timeseries', ['cloudberry.common'])
 
             $scope.ndx = crossfilter(newVal);
             var timeDimension = $scope.ndx.dimension(function (d) {
-              return d3.time.day(d.time);
+              return d3.time.hour(d.time);
             });
             var timeGroup = timeDimension.group().reduceSum(function (d) {
               return d.count;
@@ -153,9 +153,10 @@ angular.module('cloudberry.timeseries', ['cloudberry.common'])
               .group(timeGroup)
               .centerBar(true)
               .x(d3.time.scale().domain([minDate, maxDate]))
-              .xUnits(d3.time.days)
-              .gap(1)
+              .xUnits(d3.time.hours)
+              .gap(4)
               .xAxisLabel(startDate + "   to   " + endDate)
+              .transitionDuration(0)
               .elasticY(true);
 
 

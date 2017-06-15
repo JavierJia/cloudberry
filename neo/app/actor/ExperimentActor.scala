@@ -38,15 +38,15 @@ class ExperimentActor(out: ActorRef)(implicit ec: ExecutionContext, implicit val
               curReporter = Some(reporter)
               // set a large report limit
               val reportLimit = 10 * 60 * 1000 // 10 mins
-              scheduler ! Request(Parameters(reportLimit, AlgoType.EqualResultWidth, 1, reporter, keyword, 1, width = resultWidth), urEndDate, urStartDate, reportLimit)
+              scheduler ! Request(Parameters(reportLimit, AlgoType.EqualResultWidth, 1, reporter, keyword, minHours , width = resultWidth), urEndDate, urStartDate, reportLimit)
             case t if t == equalResponse =>
               val reporter = context.actorOf(Props(new Reporter(keyword, reportInterval seconds, Some(out))))
               curReporter = Some(reporter)
-              scheduler ! Request(Parameters(reportInterval * 1000, AlgoType.NormalGaussian, 1, reporter, keyword, 1), urEndDate, urStartDate, reportInterval * 1000)
+              scheduler ! Request(Parameters(reportInterval * 1000, AlgoType.NormalGaussian, 1, reporter, keyword, minHours), urEndDate, urStartDate, reportInterval * 1000)
             case t if t == minBackup =>
               val reporter = context.actorOf(Props(new Reporter(keyword, reportInterval seconds, Some(out))))
               curReporter = Some(reporter)
-              scheduler ! Request(Parameters(reportInterval * 1000, AlgoType.NormalGaussian, 1, reporter, keyword, 1, withBackup = true, useOneMain = true), urEndDate, urStartDate, reportInterval * 1000)
+              scheduler ! Request(Parameters(reportInterval * 1000, AlgoType.NormalGaussian, 1, reporter, keyword, minHours, withBackup = true, useOneMain = true), urEndDate, urStartDate, reportInterval * 1000)
           }
         case s if s == keyUpdate =>
           (json \ "type").as[String] match {
@@ -70,6 +70,7 @@ object ExperimentActor {
   val equalResult = "equal-result"
   val equalResponse = "equal-response"
   val minBackup = "min-backups"
+  val minHours = 4
 
   val urStartDate = new DateTime(2016, 11, 4, 15, 0)
   val urEndDate = new DateTime(2017, 1, 17, 6, 0)

@@ -444,8 +444,10 @@ object ResponseTime extends App with Connection {
       Seq(TimeField.TimeFormat.print(start),
         TimeField.TimeFormat.print(start.plusHours(rangeInHour))))
     val filters = keywordFilter.map(Seq(timeFilter, _)).getOrElse(Seq(timeFilter))
-    val byDay = ByStatement(TimeField("create_at"), Some(Interval(TimeUnit.Day)), Some(NumberField("day")))
-    val groupStatement = GroupStatement(Seq(byDay), Seq(aggrCount))
+    val byDay = ByStatement(TimeField("create_at"), Some(Interval(TimeUnit.Hour, 4)), Some(NumberField("day")))
+    val byState = ByStatement(NumberField("geo_tag.stateID"), None, Some(NumberField("state")))
+    val groupStatement = GroupStatement(Seq(byDay, byState), Seq(aggrCount))
+//    val groupStatement = GroupStatement(Seq(byDay), Seq(aggrCount))
     val query = Query(dataset = "twitter.ds_tweet", filter = filters, groups = Some(groupStatement))
 //    val query = Query(dataset = "twitter.ds_tweet", filter = filters, globalAggr = Some(globalAggr))
     queryGen.generate(query, Map(TwitterDataStore.DatasetName -> TwitterDataStore.TwitterSchema))
