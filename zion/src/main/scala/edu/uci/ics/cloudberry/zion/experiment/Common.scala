@@ -37,7 +37,7 @@ object Common {
   case class HistoryStats(history: mutable.Builder[Common.QueryStat, List[Common.QueryStat]],
                           fullHistory: mutable.Builder[Common.QueryStat, List[Common.QueryStat]])
 
-  class Reporter(keyword: String, limit: FiniteDuration, outOpt: Option[ActorRef]= None)(implicit val ec : ExecutionContext) extends Actor {
+  class Reporter(keyword: String, var limit: FiniteDuration, outOpt: Option[ActorRef]= None)(implicit val ec : ExecutionContext) extends Actor {
 
     import Reporter._
 
@@ -55,6 +55,8 @@ object Common {
     var json = JsArray(Seq.empty)
 
     def hungry(since: DateTime): Actor.Receive = {
+      case UpdateInterval(l) =>
+        limit = l
       case r: OneShot =>
         val delay = new TInterval(since, DateTime.now())
         delayed += delay.toDurationMillis
@@ -71,6 +73,8 @@ object Common {
     }
 
     override def receive = {
+      case UpdateInterval(l) =>
+        limit = l
       case result: OneShot => queue.enqueue(result)
       case Report => {
         if (queue.isEmpty) {
@@ -115,6 +119,8 @@ object Common {
     case class OneShot(start: DateTime, range: Int, count: Int, json: JsValue)
 
     case object Fin
+
+    case class UpdateInterval(limit: FiniteDuration)
 
   }
 

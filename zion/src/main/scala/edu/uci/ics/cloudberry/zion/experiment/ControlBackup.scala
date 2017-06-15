@@ -4,7 +4,6 @@ import akka.actor.{Actor, ActorRef, FSM, PoisonPill, Props}
 import akka.pattern.{ask, pipe}
 import akka.util.Timeout
 import edu.uci.ics.cloudberry.zion.TInterval
-import edu.uci.ics.cloudberry.zion.experiment.Common.AlgoType
 import org.joda.time.DateTime
 import play.api.libs.json.JsValue
 
@@ -92,7 +91,7 @@ object ControlBackup extends App with Connection {
       case Event(r@LabeledDBResult(DBResultType.RISK, interval, range, estMills, result), StateDataWithTimeOut(request, waitTimeOut, _, riskStats, backupStats)) =>
         workerLog.info(s"@Waiting, receive response $r")
         val start = interval.getStart
-        reportRiskSubAccBackup(request.parameters.reporter , start, range, result.sum, result.json)
+        reportRiskSubAccBackup(request.parameters.reporter, start, range, result.sum, result.json)
         learnQueryState(start, range, Some(estMills), result.mills, riskStats)
 
         cancelTimer(WaitTimerName)
@@ -109,10 +108,10 @@ object ControlBackup extends App with Connection {
     def cancelBackupQuery(): Unit = {}
 
     def reportRiskSubAccBackup(reporter: ActorRef, start: DateTime, range: Int, sum: Int, json: JsValue): Unit = {
-      if(accBackup.isClear()) {
+      if (accBackup.isClear()) {
         reporter ! Reporter.OneShot(start, range, sum, json)
       } else {
-        assert(accBackup.to.minusHours(range) == start )
+        assert(accBackup.to.minusHours(range) == start)
         assert(start.isBefore(accBackup.from))
         //FIXME
         reporter ! Reporter.OneShot(start, new TInterval(start, accBackup.from).toDuration.getStandardHours.toInt, sum - accBackup.count, json)
@@ -140,7 +139,7 @@ object ControlBackup extends App with Connection {
           case ss: StateDataWithTimeOut => ss
           case ss: StateDataWithBackupResult => ss.stateDataWithTimeOut
         }
-        reportRiskSubAccBackup( data.request.parameters.reporter, start, range, result.sum, result.json)
+        reportRiskSubAccBackup(data.request.parameters.reporter, start, range, result.sum, result.json)
         learnQueryState(start, range, Some(estMills), result.mills, data.riskStats)
 
         cancelBackupQuery()
@@ -153,7 +152,7 @@ object ControlBackup extends App with Connection {
         workerLog.info(s"${data.request.parameters.reportInterval}, ${data.request.reportLimit}, ${result.mills} ")
         goto(Risk) using StateData(data.request.copy(endTime = start, reportLimit = nextLimit.toInt), data.riskStats, data.backupStats)
 
-      case Event(r @ LabeledDBResult(DBResultType.BACKUP, interval, range, estMills, result), s@StateDataWithTimeOut(request, waitTimeOut, isPanicTimeOut, riskStats, backupStats)) =>
+      case Event(r@LabeledDBResult(DBResultType.BACKUP, interval, range, estMills, result), s@StateDataWithTimeOut(request, waitTimeOut, isPanicTimeOut, riskStats, backupStats)) =>
         workerLog.info(s"@Panic, receive backup result $r")
         if (interval.getEndMillis <= request.endTime.getMillis) {
           if (isPanicTimeOut) {
@@ -216,6 +215,19 @@ object ControlBackup extends App with Connection {
       case Event(r@LabeledDBResult(DBResultType.BACKUP, _, _, _, _), _) =>
         workerLog.error(s"$stateName received backup result $r")
         stay
+      case Event(Rewind, _) =>
+        goto(Idle) using Uninitialized
+      case Event(UpdateInterval(milli), s: SchedulerData) =>
+        s match {
+          case Uninitialized =>
+            stay
+          case data@StateData(request: Request, riskStats: HistoryStats, backupStats: HistoryStats) =>
+            stay using data.copy(request = request.copy(parameters = request.parameters.copy(reportInterval = milli)))
+          case data@StateDataWithTimeOut(request: Request, _, _, _, _) =>
+            stay using data.copy(request = request.copy(parameters = request.parameters.copy(reportInterval = milli)))
+          case data@StateDataWithBackupResult(stateDataWithTimeOut: StateDataWithTimeOut, backupResult: LabeledDBResult) =>
+            stay using data.copy(stateDataWithTimeOut.copy(request = stateDataWithTimeOut.request.copy(parameters = stateDataWithTimeOut.request.parameters.copy(reportInterval = milli))))
+        }
       case Event(any, stateData) =>
         workerLog.error(s"WTF $stateName received msg $any, using data $stateData")
         stay
@@ -230,17 +242,17 @@ object ControlBackup extends App with Connection {
     val WaitTimerName = "wait"
     val PanicTimerName = "panic"
 
-    class AccBackup(var from: DateTime, var to: DateTime, var count : Int) {
+    class AccBackup(var from: DateTime, var to: DateTime, var count: Int) {
       private var clear = true
 
-      private def init(from: DateTime, to: DateTime, count: Int): Unit ={
+      private def init(from: DateTime, to: DateTime, count: Int): Unit = {
         this.from = from
         this.to = to
         this.count = count
       }
 
-      def acc(from : DateTime, to: DateTime, count: Int): Unit = {
-        if (clear){
+      def acc(from: DateTime, to: DateTime, count: Int): Unit = {
+        if (clear) {
           init(from, to, count)
           clear = false
         } else {
@@ -250,8 +262,11 @@ object ControlBackup extends App with Connection {
         }
       }
 
-      def reset() {clear = true}
-      def isClear():Boolean = clear
+      def reset() {
+        clear = true
+      }
+
+      def isClear(): Boolean = clear
     }
 
 
@@ -328,6 +343,10 @@ object ControlBackup extends App with Connection {
 
     case object FireBackup
 
+    case object Rewind
+
+    case class UpdateInterval(milli: Int)
+
   }
 
   //// main class
@@ -341,7 +360,7 @@ object ControlBackup extends App with Connection {
   def process: Unit = {
     import Scheduler._
     val reportInterval = 4000
-    for (keyword <- Seq("clinton","election")) {
+    for (keyword <- Seq("clinton", "election")) {
       val scheduler = system.actorOf(Props(new Scheduler()))
       val reporter = system.actorOf(Props(new Reporter(keyword, reportInterval millis)))
       scheduler ! Request(Parameters(reportInterval, AlgoType.Baseline, 1, reporter, keyword, 1), urEndDate, urStartDate, reportInterval)
