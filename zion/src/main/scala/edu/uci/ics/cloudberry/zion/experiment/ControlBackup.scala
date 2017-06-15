@@ -228,6 +228,17 @@ object ControlBackup extends App with Connection {
           case data@StateDataWithBackupResult(stateDataWithTimeOut: StateDataWithTimeOut, backupResult: LabeledDBResult) =>
             stay using data.copy(stateDataWithTimeOut.copy(request = stateDataWithTimeOut.request.copy(parameters = stateDataWithTimeOut.request.parameters.copy(reportInterval = milli))))
         }
+      case Event(UpdateWidth(widthHour), s: SchedulerData) =>
+        s match {
+          case Uninitialized =>
+            stay
+          case data@StateData(request: Request, riskStats: HistoryStats, backupStats: HistoryStats) =>
+            stay using data.copy(request = request.copy(parameters = request.parameters.copy(width = widthHour)))
+          case data@StateDataWithTimeOut(request: Request, _, _, _, _) =>
+            stay using data.copy(request = request.copy(parameters = request.parameters.copy(width = widthHour)))
+          case data@StateDataWithBackupResult(stateDataWithTimeOut: StateDataWithTimeOut, backupResult: LabeledDBResult) =>
+            stay using data.copy(stateDataWithTimeOut.copy(request = stateDataWithTimeOut.request.copy(parameters = stateDataWithTimeOut.request.parameters.copy(width = widthHour))))
+        }
       case Event(any, stateData) =>
         workerLog.error(s"WTF $stateName received msg $any, using data $stateData")
         stay
@@ -302,6 +313,9 @@ object ControlBackup extends App with Connection {
       if (oneRisk) {
         RangeAndEstTime(1900, 50000)
       } else {
+        if (parameters.algo == AlgoType.EqualResultWidth){
+          return RangeAndEstTime(parameters.width, 10 * 60 * 1000)
+        }
         if (historyStats.history.result().isEmpty) {
           RangeAndEstTime(parameters.minHours, Int.MaxValue)
         } else {
@@ -347,6 +361,7 @@ object ControlBackup extends App with Connection {
 
     case class UpdateInterval(milli: Int)
 
+    case class UpdateWidth(widthHour: Int)
   }
 
   //// main class

@@ -24,7 +24,7 @@ object Common {
     val Histogram = Value(2)
     val Baseline = Value(3)
     // I am lazy
-//    val EqualResultWidth = Value(4)
+    val EqualResultWidth = Value(4)
   }
 
   case class Parameters(reportInterval: Int,
@@ -32,7 +32,9 @@ object Common {
                         alpha: Double,
                         reporter: ActorRef,
                         keyword: String,
-                        minHours: Int)
+                        minHours: Int,
+                        width: Int = 0
+                       )
 
   case class HistoryStats(history: mutable.Builder[Common.QueryStat, List[Common.QueryStat]],
                           fullHistory: mutable.Builder[Common.QueryStat, List[Common.QueryStat]])

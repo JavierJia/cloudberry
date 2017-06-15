@@ -29,6 +29,7 @@ angular.module('cloudberry.util', ['rzModule', 'cloudberry.common'])
               options: {
                 floor: 1,
                 ceil: 1600,
+                logScale: true,
                 translate: function(num) {
                   return num + 'h';
                 }
@@ -54,6 +55,7 @@ angular.module('cloudberry.util', ['rzModule', 'cloudberry.common'])
               options: {
                 floor: 1,
                 ceil: 1600,
+                logScale: true,
                 translate: function(num) {
                   return num + 'h';
                 }

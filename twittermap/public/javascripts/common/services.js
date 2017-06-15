@@ -237,7 +237,7 @@ angular.module('cloudberry.common', [])
 
     var cloudberryService = {
 
-      totalCount: 0,
+      totalCount: 121678800,
       startDate: startDate,
       parameters: {
         dataset: "twitter.ds_tweet",

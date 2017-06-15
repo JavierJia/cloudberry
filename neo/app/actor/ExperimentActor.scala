@@ -5,7 +5,7 @@ import akka.stream.Materializer
 import edu.uci.ics.cloudberry.zion.experiment.Common.Reporter.Fin
 import edu.uci.ics.cloudberry.zion.experiment.Common.{AlgoType, Parameters, Reporter}
 import edu.uci.ics.cloudberry.zion.experiment.ControlBackup.Scheduler
-import edu.uci.ics.cloudberry.zion.experiment.ControlBackup.Scheduler.{Request, Rewind, UpdateInterval}
+import edu.uci.ics.cloudberry.zion.experiment.ControlBackup.Scheduler.{Request, Rewind, UpdateInterval, UpdateWidth}
 import org.joda.time.DateTime
 import play.api.Logger
 import play.api.libs.json.JsValue
@@ -26,24 +26,36 @@ class ExperimentActor(out: ActorRef)(implicit ec: ExecutionContext, implicit val
       Logger.info("received:" + json.toString())
       (json \ "key").as[String] match {
         case s if s == keyRequest =>
+          val reportInterval = (json \ "interval").as[Int]
+          val keyword = (json \ "keywords").as[Seq[String]].headOption.getOrElse("")
+          curReporter.map(_ ! PoisonPill)
+          scheduler ! Rewind
+
           (json \ "type").as[String] match {
             case t if t == equalResult =>
-            case t if t == equalResponse =>
-              val reportInterval = (json \ "interval").as[Int]
-              val keyword = (json \ "keywords").as[Seq[String]].headOption.getOrElse("")
-
-              curReporter.map(_ ! PoisonPill)
-              scheduler ! Rewind
-              val reporter = context.actorOf(Props(new Reporter(keyword, reportInterval seconds, Some(out))))
-              scheduler ! Request(Parameters(reportInterval * 1000, AlgoType.NormalGaussian, 1, reporter, keyword, 1), urEndDate, urStartDate, reportInterval * 1000)
+              val resultWidth = reportInterval // in hour
+              val reporter = context.actorOf(Props(new Reporter(keyword, 10 millis, Some(out))))
               curReporter = Some(reporter)
+              // set a large report limit
+              val reportLimit = 10 * 60 * 1000 // 10 mins
+              scheduler ! Request(Parameters(reportLimit, AlgoType.EqualResultWidth, 1, reporter, keyword, 1, width = resultWidth), urEndDate, urStartDate, reportLimit)
+            case t if t == equalResponse =>
+              val reporter = context.actorOf(Props(new Reporter(keyword, reportInterval seconds, Some(out))))
+              curReporter = Some(reporter)
+              scheduler ! Request(Parameters(reportInterval * 1000, AlgoType.NormalGaussian, 1, reporter, keyword, 1), urEndDate, urStartDate, reportInterval * 1000)
             case t if t == minBackup =>
               ???
           }
         case s if s == keyUpdate =>
-          val newInterval = (json \ "interval").as[Int]
-          curReporter.map( _ ! Reporter.UpdateInterval(newInterval second))
-          scheduler ! UpdateInterval(newInterval * 1000)
+          (json \ "type").as[String] match {
+            case t if t == equalResult =>
+              val newHour = (json \ "interval").as[Int]
+              scheduler ! UpdateWidth(newHour)
+            case t if t == equalResponse =>
+              val newInterval = (json \ "interval").as[Int]
+              curReporter.map(_ ! Reporter.UpdateInterval(newInterval second))
+              scheduler ! UpdateInterval(newInterval * 1000)
+          }
       }
   }
 }
