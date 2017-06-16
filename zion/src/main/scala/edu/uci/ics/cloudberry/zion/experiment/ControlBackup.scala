@@ -5,10 +5,13 @@ import akka.pattern.{ask, pipe}
 import akka.util.Timeout
 import edu.uci.ics.cloudberry.zion.TInterval
 import org.joda.time.DateTime
-import play.api.libs.json.JsValue
+import play.api.Logger
+import play.api.libs.json._
 
+import scala.collection.mutable
 import scala.concurrent.{Await, Future}
 import scala.concurrent.duration._
+import scala.util.parsing.json.JSONObject
 
 object ControlBackup extends App with Connection {
 
@@ -41,6 +44,9 @@ object ControlBackup extends App with Connection {
 
     var sumRisk = 0
     var sumBackup = 0
+
+    var accResult: AccResult = null
+    var accResultBeforeBackup: AccResult = null
 
     startWith(Idle, Uninitialized)
 
@@ -108,14 +114,21 @@ object ControlBackup extends App with Connection {
     def cancelBackupQuery(): Unit = {}
 
     def reportRiskSubAccBackup(reporter: ActorRef, start: DateTime, range: Int, sum: Int, json: JsValue): Unit = {
-      if (accBackup.isClear()) {
-        reporter ! Reporter.OneShot(start, range, sum, json)
+      if (accResultBeforeBackup == null) {
+        if (accResult == null) {
+          accResult = new AccResult(start, start.plusHours(range), sum, json.asInstanceOf[JsArray])
+        } else {
+          accResult.merge(start, start.plusHours(range), sum, json.asInstanceOf[JsArray])
+        }
+        reporter ! Reporter.OneShot(accResult.from, accResult.getRange, accResult.count, accResult.json)
+
       } else {
-        assert(accBackup.to.minusHours(range) == start)
-        assert(start.isBefore(accBackup.from))
-        //FIXME
-        reporter ! Reporter.OneShot(start, new TInterval(start, accBackup.from).toDuration.getStandardHours.toInt, sum - accBackup.count, json)
-        accBackup.reset()
+        //        assert(accBackup.to.minusHours(range) == start)
+        //        assert(start.isBefore(accBackup.from))
+        accResult = accResultBeforeBackup
+        accResult.merge(start, start.plusHours(range), sum, json.asInstanceOf[JsArray])
+        reporter ! Reporter.OneShot(accResult.from, accResult.getRange, accResult.count, accResult.json)
+        accResultBeforeBackup = null
       }
     }
 
@@ -189,10 +202,21 @@ object ControlBackup extends App with Connection {
     def reportBackup(reporter: ActorRef, dbResult: LabeledDBResult, backupStats: HistoryStats, nextLimit: Int): Int = {
       val start = dbResult.interval.getStart
       val range = dbResult.range
-      reporter ! Reporter.OneShot(start, range, dbResult.result.sum, dbResult.result.json)
+
+      if (accResultBeforeBackup == null) {
+        if (accResult != null) {
+          accResultBeforeBackup = accResult.copy()
+        }
+      }
+      if (accResult != null) {
+        accResult.merge(start, dbResult.interval.getEnd, dbResult.result.sum, dbResult.result.json.asInstanceOf[JsArray])
+      } else {
+        accResult = new AccResult(start, dbResult.interval.getEnd, dbResult.result.sum, dbResult.result.json.asInstanceOf[JsArray])
+      }
+
+      reporter ! Reporter.OneShot(accResult.from, accResult.getRange, accResult.count, accResult.json)
       learnQueryState(start, range, Some(dbResult.estMills), dbResult.result.mills, backupStats)
 
-      accBackup.acc(start, dbResult.interval.getEnd, dbResult.result.sum)
 
       val waitingTimeOut = decideWaitTime(backupStats, nextLimit, true)
       setTimer(WaitTimerName, WaitTimeOut, waitingTimeOut millis)
@@ -248,8 +272,6 @@ object ControlBackup extends App with Connection {
         stay
     }
 
-    val accBackup = new AccBackup(DateTime.now(), DateTime.now(), 0)
-
     initialize()
   }
 
@@ -284,6 +306,45 @@ object ControlBackup extends App with Connection {
       def isClear(): Boolean = clear
     }
 
+    class AccResult(var from: DateTime, var to: DateTime, var count: Int, var json: JsArray) {
+
+      def merge(from: DateTime, to: DateTime, count: Int, json: JsArray): Unit = {
+        assert(to == this.from)
+        this.from = from
+        this.count += count
+        this.json = mergeJSONArray(this.json, json, Seq("day", "state"), "count")
+      }
+
+      def getRange: Int = {
+        new TInterval(from, to).toDuration.getStandardHours.toInt
+      }
+
+      def copy(): AccResult = {
+        new AccResult(from, to, count, json)
+      }
+    }
+
+    def mergeJSONArray(jsLeft: JsArray, jsRight: JsArray, keyIds: Seq[String], countField: String): JsArray = {
+      val mapBuilder = mutable.HashMap.empty[Seq[JsValue], Int]
+      insertOrUpdate(mapBuilder, jsLeft, keyIds, countField)
+      insertOrUpdate(mapBuilder, jsRight, keyIds, countField)
+
+      JsArray(mapBuilder.map { case (keys, count) =>
+        val ks = keyIds.zip(keys).map { case (id, k) => id -> k }
+        JsObject(ks ++ Seq(countField -> JsNumber(count)))
+      }.toSeq)
+    }
+
+    def insertOrUpdate(map: mutable.Map[Seq[JsValue], Int], jsArray: JsArray, keyIds: Seq[String], countField: String): Unit = {
+      jsArray.value.map { jsObj =>
+        val keys = keyIds.map(k => (jsObj \ k).as[JsValue])
+        val count = (jsObj \ countField).as[Int]
+        map.get(keys) match {
+          case Some(c) => map += keys -> (count + c)
+          case None => map += keys -> count
+        }
+      }
+    }
 
     case class Request(parameters: Parameters, endTime: DateTime, till: DateTime, reportLimit: Int)
 
@@ -374,7 +435,9 @@ object ControlBackup extends App with Connection {
 
 
   def process: Unit = {
+
     import Scheduler._
+
     val reportInterval = 4000
     for (keyword <- Seq("clinton", "election")) {
       val scheduler = system.actorOf(Props(new Scheduler()))

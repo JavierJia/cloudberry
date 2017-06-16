@@ -438,6 +438,7 @@ object ResponseTime extends App with Connection {
     }
   }
 
+  //TODO change to multiple keywords
   def getAQL(start: DateTime, rangeInHour: Int, keyword: Option[String]): String = {
     val keywordFilter = keyword.map(k => FilterStatement(TextField("text"), None, Relation.contains, Seq(k)))
     val timeFilter = FilterStatement(TimeField("create_at"), None, Relation.inRange,

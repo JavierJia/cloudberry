@@ -284,7 +284,8 @@ angular.module('cloudberry.common', [])
       $timeout(function() {
         var result = JSONbig.parse(event.data);
         console.log(result);
-        cloudberryService.timeResult = result;
+        cloudberryService.timeResult = result[0];
+        cloudberryService.mapResult = result[1];
         // switch (result.key) {
         //   case "sample":
         //     cloudberryService.tweetResult = result.value[0];

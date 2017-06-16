@@ -4,7 +4,7 @@ import akka.actor.{Actor, ActorRef, PoisonPill}
 import edu.uci.ics.cloudberry.zion.TInterval
 import org.joda.time.DateTime
 import play.api.Logger
-import play.api.libs.json.{JsArray, JsValue}
+import play.api.libs.json.{JsArray, JsNumber, JsObject, JsValue}
 
 import scala.collection.mutable
 import scala.concurrent.ExecutionContext
@@ -34,14 +34,14 @@ object Common {
                         keyword: String,
                         minHours: Int,
                         width: Int = 0,
-                        withBackup : Boolean = false,
+                        withBackup: Boolean = false,
                         useOneMain: Boolean = false
                        )
 
   case class HistoryStats(history: mutable.Builder[Common.QueryStat, List[Common.QueryStat]],
                           fullHistory: mutable.Builder[Common.QueryStat, List[Common.QueryStat]])
 
-  class Reporter(keyword: String, var limit: FiniteDuration, outOpt: Option[ActorRef]= None)(implicit val ec : ExecutionContext) extends Actor {
+  class Reporter(keyword: String, var limit: FiniteDuration, outOpt: Option[ActorRef] = None)(implicit val ec: ExecutionContext) extends Actor {
 
     import Reporter._
 
@@ -55,8 +55,37 @@ object Common {
     var numReports = 0
     var numFailed = 0
     var delayed = 0l
-    val sumResultBuilder = Seq.newBuilder[Int]
-    var json = JsArray(Seq.empty)
+
+    def toJson(mapBuilder: mutable.Map[JsValue, Int], keyField: String): JsArray = {
+      JsArray(mapBuilder.map { case (key, count) =>
+        JsObject(Seq(keyField -> key, "count" -> JsNumber(count)))
+      }.toSeq)
+    }
+
+    def splitAndReport(out: ActorRef, json: JsValue): Unit = {
+      val map = mutable.HashMap.empty[JsValue, Int]
+      json.asInstanceOf[JsArray].value.foreach { case obj: JsObject =>
+        val key = (obj \ "day").as[JsValue]
+        val count = (obj \ "count").as[Int]
+        map.get(key) match {
+          case Some(c) => map.put(key, count + c)
+          case None => map.put(key, count)
+        }
+      }
+      val perDay = toJson(map, "day")
+      map.clear()
+
+      json.asInstanceOf[JsArray].value.foreach { case obj: JsObject =>
+        val key = (obj \ "state").as[JsValue]
+        val count = (obj \ "count").as[Int]
+        map.get(key) match {
+          case Some(c) => map.put(key, count + c)
+          case None => map.put(key, count)
+        }
+      }
+      val perState =  toJson(map, "state")
+      out ! JsArray(Seq(perDay, perState))
+    }
 
     def hungry(since: DateTime): Actor.Receive = {
       case UpdateInterval(l) =>
@@ -64,9 +93,7 @@ object Common {
       case r: OneShot =>
         val delay = new TInterval(since, DateTime.now())
         delayed += delay.toDurationMillis
-        sumResultBuilder += r.count
-        json = json ++ r.json.asInstanceOf[JsArray]
-        outOpt.map(_ ! json)
+        outOpt.map(splitAndReport(_, r.json))
         reportLog.info(s"$keyword delayed ${delay.toDurationMillis / 1000.0}, range ${r.range}, count: ${r.count}")
         schedule = context.system.scheduler.schedule(limit, limit, self, Report)
         context.unbecome()
@@ -87,9 +114,7 @@ object Common {
           numFailed += 1
         } else {
           val result = queue.dequeue()
-          sumResultBuilder += result.count
-          json = json ++ result.json.asInstanceOf[JsArray]
-          outOpt.map(_ ! json)
+          outOpt.map(splitAndReport(_, result.json))
           reportLog.info(s"$keyword report result from ${result.start} of range ${result.range}, count ${result.count}")
         }
         numReports += 1
@@ -97,19 +122,13 @@ object Common {
       case Fin => {
         if (queue.nonEmpty) {
           val all = queue.dequeueAll(_ => true)
-          val sum = all.map(_.count).sum
+          val sum = all.map(_.count).last
           reportLog.info(s"$keyword report result from ${all.map(_.start).last} of range ${all.map(_.range).last}, count ${sum}")
           numReports += 1
-          sumResultBuilder += sum
-          json = json ++ all.map(_.json.asInstanceOf[JsArray]).reduce((l,s) => l ++ s)
-          outOpt.map(_ ! json)
+          outOpt.map(splitAndReport(_, all.last.json))
         }
         val totalTime = DateTime.now().getMillis - startTime.getMillis
-        val sumResult = sumResultBuilder.result()
-        val avg = sumResult.sum / sumResult.size.toDouble
-        val variance = sumResult.map( c => (c-avg)*(c-avg)).sum / sumResult.size
-        val o = Math.sqrt(variance)
-        reportLog.info(s"$keyword numOfReports: $numReports, sumTime: ${totalTime / 1000.0}, numOfFail: $numFailed, sumDelay: ${delayed / 1000.0}, sumCount:${sumResult.sum}, countVar: $variance, std:$o")
+        reportLog.info(s"$keyword numOfReports: $numReports, sumTime: ${totalTime / 1000.0}, numOfFail: $numFailed, sumDelay: ${delayed / 1000.0}")
         reportLog.info(s"=============FIN===============")
         self ! PoisonPill
       }
