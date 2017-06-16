@@ -259,13 +259,14 @@ angular.module('cloudberry.common', [])
       errorMessage: null,
 
       query: function(parameters) {
+        cloudberryService.mapResult = [];
+        cloudberryService.timeResult = [];
         var json = JSON.stringify({
             key: "request",
             type: parameters.type,
             interval: parameters.interval,
             keywords: parameters.keywords
         });
-        console.log("query:", json);
         ws.send(json);
       },
 

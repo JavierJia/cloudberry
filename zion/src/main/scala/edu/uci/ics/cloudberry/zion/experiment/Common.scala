@@ -16,7 +16,9 @@ object Common {
 
   case class QueryStat(targetMS: Int, estSlice: Int, actualMS: Int)
 
-  case class ResultFromDB(mills: Long, sum: Int, json: JsValue)
+  case class ResultFromDB(mills: Long, sum: Int, json: JsValue) {
+    override def toString: String = s" ResultFromDB{mills:$mills, sum:$sum} "
+  }
 
   object AlgoType extends Enumeration {
     type Type = Value

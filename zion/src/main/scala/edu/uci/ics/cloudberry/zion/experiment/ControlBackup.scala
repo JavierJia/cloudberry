@@ -206,6 +206,8 @@ object ControlBackup extends App with Connection {
       if (accResultBeforeBackup == null) {
         if (accResult != null) {
           accResultBeforeBackup = accResult.copy()
+        } else {
+          accResultBeforeBackup = new AccResult(urEndDate, urEndDate, 0, JsArray(Seq.empty))
         }
       }
       if (accResult != null) {
@@ -224,6 +226,9 @@ object ControlBackup extends App with Connection {
     }
 
     onTransition {
+      case any -> Idle =>
+        accResult = null
+        accResultBeforeBackup = null
       case any -> Risk =>
         workerLog.info(s"transition from $any to Risk")
         self ! FireRisk
@@ -309,6 +314,7 @@ object ControlBackup extends App with Connection {
     class AccResult(var from: DateTime, var to: DateTime, var count: Int, var json: JsArray) {
 
       def merge(from: DateTime, to: DateTime, count: Int, json: JsArray): Unit = {
+        Logger.error(s"from:$from, to:$to, this.from:${this.from}, this.to:${this.to}")
         assert(to == this.from)
         this.from = from
         this.count += count
