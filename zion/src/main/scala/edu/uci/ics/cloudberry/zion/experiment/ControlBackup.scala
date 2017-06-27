@@ -444,26 +444,30 @@ object ControlBackup extends App with Connection {
 
     import Scheduler._
 
-    val reportInterval = 4000
-    for (keyword <- Seq("clinton", "election")) {
-      val scheduler = system.actorOf(Props(new Scheduler()))
-      val reporter = system.actorOf(Props(new Reporter(keyword, reportInterval millis)))
-      scheduler ! Request(Parameters(reportInterval, AlgoType.Baseline, 1, reporter, keyword, 1), urEndDate, urStartDate, reportInterval)
-      breakable {
-        while (true) {
-          implicit val timeOut: Timeout = Timeout(5 seconds)
-          (Await.result(scheduler ? CheckState, Duration.Inf)).asInstanceOf[SchedulerState] match {
-            case Idle =>
-              scheduler ! PoisonPill
-              Thread.sleep(5000)
-              break
-            case any =>
-              workerLog.info(s"CheckState is $any")
-              Thread.sleep(5000)
+    for( reportInterval <- Seq(2000,4000) ) {
+      for (withBackup <- Seq(false, true)) {
+        for (keyword <- Seq("clinton", "election", "")) {
+          val scheduler = system.actorOf(Props(new Scheduler()))
+          val reporter = system.actorOf(Props(new Reporter(keyword, reportInterval millis)))
+          scheduler ! Request(Parameters(reportInterval, AlgoType.NormalGaussian, 1, reporter, keyword, 1, withBackup = withBackup), urEndDate, urStartDate, reportInterval)
+          breakable {
+            while (true) {
+              implicit val timeOut: Timeout = Timeout(15 seconds)
+              (Await.result(scheduler ? CheckState, Duration.Inf)).asInstanceOf[SchedulerState] match {
+                case Idle =>
+                  scheduler ! PoisonPill
+                  workerLog.info(s"DONE $keyword, reportInterval:$reportInterval, withBackup: $withBackup")
+                  Thread.sleep(5000)
+                  break
+                case any =>
+                  workerLog.info(s"CheckState is $any")
+                  Thread.sleep(5000)
+              }
+            }
           }
+
         }
       }
-
     }
   }
 

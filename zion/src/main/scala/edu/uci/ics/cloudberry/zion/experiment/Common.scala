@@ -100,7 +100,7 @@ object Common {
         schedule = context.system.scheduler.schedule(limit, limit, self, Report)
         context.unbecome()
       case Report =>
-      // do nothing
+        reportLog.info(s"$keyword has nothing to report")
       case any =>
         reportLog.warn(s"$keyword in hungry mode, don't know the message: $any")
     }
