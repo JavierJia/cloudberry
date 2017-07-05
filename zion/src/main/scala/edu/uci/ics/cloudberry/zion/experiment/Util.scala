@@ -225,22 +225,22 @@ object Stats extends App {
 
   val obs: WeightedObservedPoints = new WeightedObservedPoints()
   Seq((1, 0.5), (7, 3.9), (2, 1.8)).foreach(x => obs.add(x._1, x._2))
-  val coeff = linearFitting(obs)
-  println(coeff)
+//  val coeff = linearFitting(obs)
+  val coeff = Coeff(0.33548, 0.51935)
+//  println(coeff)
   val variance = calcVariance(obs, coeff)
   //    val variance = 0.25
   //  val stdDev = Math.sqrt(variance)
-  val stdDev = 0.5
+  val stdDev = 1
   println(variance, stdDev)
 
-  val C = 2
+  val C = 2.2
   Seq(1).foreach { alpha =>
     //  useNormalizedLinearFunction(C, stdDev, alpha)
     //  useOneLinearFunction(C, stdDev, alpha, coeff.a0, coeff.a1)
-    //    useRealGaussian(C, stdDev, alpha, coeff.a0, coeff.a1)
-    //  use3UniformFunction(C, stdDev, alpha)
-    val px = useHistogramUniformFunction(100, 2, 0.2, 0.3, 0.5, alpha, Seq(0.35, 0.26, 0.24, 0.01))
-    println(px)
+        useRealGaussian(C, stdDev, alpha, coeff.a0, coeff.a1)
+//    val px = useHistogramUniformFunction(100, 2, 0.2, 0.3, 0.5, alpha, Seq(0.35, 0.26, 0.24, 0.01))
+//    println(px)
   }
 }
 

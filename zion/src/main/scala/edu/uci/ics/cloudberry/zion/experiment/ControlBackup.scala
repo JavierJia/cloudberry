@@ -85,7 +85,7 @@ object ControlBackup extends App with Connection {
           val RangeAndEstTime(rRisk, estMills) = decideRRiskAndESTTime(endTime, till, waitingTimeOut, riskStats, parameters)
 
           val start = endTime.minusHours(rRisk)
-          val sql = ResponseTime.getAQL(start, rRisk, toOpt(parameters.keyword))
+          val sql = ResponseTime.getCountOnlyAQL(start, rRisk, toOpt(parameters.keyword))
           runAQuery(sql, DBResultType.RISK, start, endTime, rRisk, estMills) pipeTo self
 
           setTimer(WaitTimerName, WaitTimeOut, waitingTimeOut millis)
@@ -141,7 +141,7 @@ object ControlBackup extends App with Connection {
           val RangeAndEstTime(rBackup, estMills) = decideRBackAndESTTime(endTime, till, panicLimit, backupStats, parameters)
 
           val start = endTime.minusHours(rBackup)
-          val sql = ResponseTime.getAQL(start, rBackup, toOpt(parameters.keyword))
+          val sql = ResponseTime.getCountOnlyAQL(start, rBackup, toOpt(parameters.keyword))
           runAQuery(sql, DBResultType.BACKUP, start, endTime, rBackup, estMills) pipeTo self
 
           setTimer(PanicTimerName, PanicTimeOut, panicLimit millis)
@@ -164,7 +164,11 @@ object ControlBackup extends App with Connection {
         val nextLimit = if (data.panicTimeOut) {
           data.request.parameters.reportInterval
         } else {
-          data.request.parameters.reportInterval + data.request.reportLimit - result.mills
+          if (data.request.reportLimit > result.mills) {  // only for the case of no backup queries
+            data.request.parameters.reportInterval + data.request.reportLimit - result.mills
+          } else {
+            data.request.parameters.reportInterval
+          }
         }
         workerLog.info(s"${data.request.parameters.reportInterval}, ${data.request.reportLimit}, ${result.mills} ")
         goto(Risk) using StateData(data.request.copy(endTime = start, reportLimit = nextLimit.toInt), data.riskStats, data.backupStats)
@@ -318,7 +322,9 @@ object ControlBackup extends App with Connection {
         assert(to == this.from)
         this.from = from
         this.count += count
-        this.json = mergeJSONArray(this.json, json, Seq("day", "state"), "count")
+        //        this.json = mergeJSONArray(this.json, json, Seq("day", "state"), "count")
+//        this.json = mergeJSONArray(this.json, json, Seq("day"), "count")
+        this.json = mergeCount(this.json, json)
       }
 
       def getRange: Int = {
@@ -328,6 +334,11 @@ object ControlBackup extends App with Connection {
       def copy(): AccResult = {
         new AccResult(from, to, count, json)
       }
+    }
+
+    def mergeCount(jsLeft: JsArray, jsRight: JsArray): JsArray ={
+      val count = (jsLeft \ "count").asOpt[Int].getOrElse(0) + (jsRight \ "count").asOpt[Int].getOrElse(0)
+      JsArray(Seq(JsObject(Seq("count" -> JsNumber(count)))))
     }
 
     def mergeJSONArray(jsLeft: JsArray, jsRight: JsArray, keyIds: Seq[String], countField: String): JsArray = {
@@ -444,9 +455,9 @@ object ControlBackup extends App with Connection {
 
     import Scheduler._
 
-    for( reportInterval <- Seq(2000,4000) ) {
-      for (withBackup <- Seq(false, true)) {
-        for (keyword <- Seq("clinton", "election", "")) {
+    for (reportInterval <- Seq(2000)) {
+      for (withBackup <- Seq(true, false)) {
+        for (keyword <- Seq("clinton")) {
           val scheduler = system.actorOf(Props(new Scheduler()))
           val reporter = system.actorOf(Props(new Reporter(keyword, reportInterval millis)))
           scheduler ! Request(Parameters(reportInterval, AlgoType.NormalGaussian, 1, reporter, keyword, 1, withBackup = withBackup), urEndDate, urStartDate, reportInterval)

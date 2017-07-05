@@ -179,7 +179,7 @@ object ResponseTime extends App with Connection {
 
   def startToEnd(): Unit = {
     for (keyword <- keywords) {
-      val aql = getAQL(urStartDate, new Duration(urStartDate, urEndDate).getStandardHours.toInt,
+      val aql = getGroupByDateAndStateAQL(urStartDate, new Duration(urStartDate, urEndDate).getStandardHours.toInt,
         if (keyword.length > 0) Some(keyword) else None)
       val (runTime, avgTime, count) = multipleTime(3, aql)
       println(s"$urStartDate,$urEndDate,$keyword, cold:$runTime, warm: $avgTime, $count")
@@ -213,7 +213,7 @@ object ResponseTime extends App with Connection {
 
               val start0 = endTime.minusHours(unit.toInt)
               numQuery += 1
-              val aql0 = getAQL(start0, unit.toInt, if (keyword.length > 0) Some(keyword) else None)
+              val aql0 = getGroupByDateAndStateAQL(start0, unit.toInt, if (keyword.length > 0) Some(keyword) else None)
               val (runTime0, _, count0) = multipleTime(0, aql0)
               print(s"$algo,$alpha,$start0,$unit,$keyword,$limit,$limit,$runTime0,$count0")
 
@@ -239,7 +239,7 @@ object ResponseTime extends App with Connection {
                   val nextRangeLast = (Math.ceil(restLimit * unit / runTime0.toDouble)).toInt
                   val nextRange = Math.min(nextRangeModel, nextRangeLast)
                   val start1 = start0.minusHours(nextRange.toInt)
-                  val aql1 = getAQL(start1, nextRange.toInt, if (keyword.length > 0) Some(keyword) else None)
+                  val aql1 = getGroupByDateAndStateAQL(start1, nextRange.toInt, if (keyword.length > 0) Some(keyword) else None)
                   numQuery += 1
                   val (runTime1, _, count1) = multipleTime(0, aql1)
 
@@ -310,7 +310,7 @@ object ResponseTime extends App with Connection {
 
             def streamRun(endTime: DateTime, range: Int, limit: Int, target: Int): Stream[(DateTime, Int)] = {
               val start = endTime.minusHours(range)
-              val aql = getAQL(start, range, if (keyword.length > 0) Some(keyword) else None)
+              val aql = getGroupByDateAndStateAQL(start, range, if (keyword.length > 0) Some(keyword) else None)
               val (runTime, _, count) = multipleTime(0, aql)
 
               history += QueryStat(target, range, runTime.toInt)
@@ -439,7 +439,7 @@ object ResponseTime extends App with Connection {
   }
 
   //TODO change to multiple keywords
-  def getAQL(start: DateTime, rangeInHour: Int, keyword: Option[String]): String = {
+  def getGroupByDateAndStateAQL(start: DateTime, rangeInHour: Int, keyword: Option[String]): String = {
     val keywordFilter = keyword.map(k => FilterStatement(TextField("text"), None, Relation.contains, Seq(k)))
     val timeFilter = FilterStatement(TimeField("create_at"), None, Relation.inRange,
       Seq(TimeField.TimeFormat.print(start),
@@ -454,6 +454,18 @@ object ResponseTime extends App with Connection {
     queryGen.generate(query, Map(TwitterDataStore.DatasetName -> TwitterDataStore.TwitterSchema))
   }
 
+  def getCountOnlyAQL(start: DateTime, rangeInHour: Int, keyword: Option[String]): String = {
+    val keywordFilter = keyword.map(k => FilterStatement(TextField("text"), None, Relation.contains, Seq(k)))
+    val timeFilter = FilterStatement(TimeField("create_at"), None, Relation.inRange,
+      Seq(TimeField.TimeFormat.print(start),
+        TimeField.TimeFormat.print(start.plusHours(rangeInHour))))
+    val filters = keywordFilter.map(Seq(timeFilter, _)).getOrElse(Seq(timeFilter))
+//    val byDay = ByStatement(TimeField("create_at"), Some(Interval(TimeUnit.Day)), Some(NumberField("day")))
+//    val groupStatement = GroupStatement(Seq(byDay), Seq(aggrCount))
+//    val groupStatement = GroupStatement(Seq(byDay), Seq(aggrCount))
+    val query = Query(dataset = "twitter.ds_tweet", filter = filters, globalAggr = Some(globalAggr))
+    queryGen.generate(query, Map(TwitterDataStore.DatasetName -> TwitterDataStore.TwitterSchema))
+  }
 
   exit()
 }

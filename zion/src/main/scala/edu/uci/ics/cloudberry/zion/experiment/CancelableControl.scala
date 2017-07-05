@@ -52,7 +52,7 @@ object CancelableControl extends App with Connection {
     val start = endTime.minusHours(parameters.minHours)
     // first minQuery
     val optKeyword = if (parameters.keyword.length > 0) Some(parameters.keyword) else None
-    val query = ResponseTime.getAQL(start, parameters.minHours, optKeyword)
+    val query = ResponseTime.getGroupByDateAndStateAQL(start, parameters.minHours, optKeyword)
     val f = runAQuery(query, QueryIDNormal)
     // we have to wait no matter how slow it it
     val retMin = Await.result(f, scala.concurrent.duration.Duration.Inf)
@@ -77,7 +77,7 @@ object CancelableControl extends App with Connection {
     val target = curDeadline + parameters.reportInterval - 2 * retMin.mills
     val (adventureRange, estTarget) = ResponseTime.estimateInGeneral(target.toInt, parameters.alpha, state.history.result(), state.fullHistory.result(), parameters.algo)
     val startAdventure = start.minusHours(adventureRange.toInt)
-    val queryAdventure = ResponseTime.getAQL(startAdventure, adventureRange.toInt, optKeyword)
+    val queryAdventure = ResponseTime.getGroupByDateAndStateAQL(startAdventure, adventureRange.toInt, optKeyword)
 
     val fAdv = runAQuery(queryAdventure, QueryIDADV)
     try {
@@ -95,7 +95,7 @@ object CancelableControl extends App with Connection {
         cancelPreviousQuery(QueryIDADV)
         workerLog.info(s"Cancel Adventure query:$startAdventure,${adventureRange.toInt}")
         val startMakeUp = start.minusHours(parameters.minHours)
-        val makeupQuery = ResponseTime.getAQL(startMakeUp, parameters.minHours, optKeyword)
+        val makeupQuery = ResponseTime.getGroupByDateAndStateAQL(startMakeUp, parameters.minHours, optKeyword)
         val fMakeup = runAQuery(makeupQuery, QueryIDNormal)
         // we have to wait no matter how slow it it
         val retMakeup = Await.result(fMakeup, scala.concurrent.duration.Duration.Inf)
