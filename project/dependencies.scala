@@ -77,6 +77,8 @@ object Dependencies {
     "joda-time" % "joda-time" % "2.9.3",
     "org.apache.commons" % "commons-math3" % "3.6.1",
     "com.typesafe.akka" %% "akka-actor" % "2.4.4",
+    "org.apache.spark" % "spark-core_2.11" % "2.1.0",
+    "org.apache.spark" % "spark-sql_2.11" % "2.1.0",
     ("com.typesafe.play" %% "play-json" % playVersion).exclude("commons-logging", "commons-logging"),
     "com.typesafe.play" %% "play-ws" % playVersion
   ) ++ testDeps
