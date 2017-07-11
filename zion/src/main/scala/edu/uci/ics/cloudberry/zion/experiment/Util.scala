@@ -164,11 +164,11 @@ object Stats extends App {
          |set terminal postscript eps enhanced size 3in,3in
          |
          |g(x)=$a1*x+$a0
-         |f(l, k, g) = l - (k - $j)*$b - g
+         |y(l, k, x) = l - (k - $j)*$b - x
          |y3(x) = x*x*x
-         |E(k, R,l, alpha, a0, a1, pk, sumy, const, g) = (g-a0) / (a1*R) - alpha/l * ( \\
-         |       pk/(2* $b*$b) * y3($b- f(l,k,g)) + \\
-         |       -sumy* f(l,k,g) + const)
+         |E(k, R,l,  alpha, a0, a1, pk, sumy, const, x) = (l - y(l,k,x) - a0 - (k-$j)*$b) / (a1*R) - alpha/l * ( \\
+         |       pk/(2* $b*$b) * y3($b- y(l,k,x)) + \\
+         |       -sumy* y(l,k,x) + const)
          |
        """.stripMargin
 
@@ -182,7 +182,6 @@ object Stats extends App {
 
       val gl = l - (k - j + 1) * b
       val gh = l - (k  -j)*b
-//      val plot = s"plot [0:0.1] E($k, $R,$l, $alpha, $a0, $a1, $pk, $sumy,$const,x)"
       val plot = s"plot [$gl:$gh] E($k, $R,$l, $alpha, $a0, $a1, $pk, $sumy,$const,x)"
       println(plot)
     }
