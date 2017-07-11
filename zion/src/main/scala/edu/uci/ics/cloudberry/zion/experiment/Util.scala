@@ -164,14 +164,13 @@ object Stats extends App {
          |set terminal postscript eps enhanced size 3in,3in
          |
          |g(x)=$a1*x+$a0
-         |f(l, k, g) = l - (k - $j)*$b - g
+         |f(k, g) = l - (k - $j)*$b
          |y3(x) = x*x*x
-         |E(k, R,l,  alpha, a0, a1, pk, sumy, const, g) = (g-a0)/(a1*R) - alpha/l * ( \\
-         |       pk/(2* $b*$b) * y3($b- f(l,k,g)) + \\
-         |       -sumy* f(l,k,g) + const)
+         |E(k, R,l,  alpha, a0, a1, pk, sumy, const, x) = (l - x - a0 - (k-$j)*$b) / (a1*R) - alpha/l * ( \\
+         |       pk/(2* $b*$b) * y3($b-x) + \\
+         |       -sumy*x + const)
          |
-         |plot [0:$l]  \\
-       """.stripMargin.trim
+       """.stripMargin
 
     println(string)
     j until Pr.size foreach { k =>
@@ -183,11 +182,9 @@ object Stats extends App {
 
       val gl = l - (k - j + 1) * b
       val gh = l - (k  -j)*b
-      val plot = s" ($gl <= x < $gh ?  E($k, $R,$l, $alpha, $a0, $a1, $pk, $sumy,$const,x) : \\"
+      val plot = s"plot [0:0.1] E($k, $R,$l, $alpha, $a0, $a1, $pk, $sumy,$const,x)"
       println(plot)
     }
-    print(0)
-    j until Pr.size foreach (k => print(")"))
   }
 
   def useNormalizedLinearFunction(C: Double, stdDev: Double, alpha: Double): Unit = {

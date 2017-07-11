@@ -457,7 +457,7 @@ object ControlBackup extends App with Connection {
 
     for (reportInterval <- Seq(2000)) {
       for (withBackup <- Seq(true, false)) {
-        for (keyword <- Seq("clinton")) {
+        for (keyword <- Seq("clinton","election")) {
           val scheduler = system.actorOf(Props(new Scheduler()))
           val reporter = system.actorOf(Props(new Reporter(keyword, reportInterval millis)))
           scheduler ! Request(Parameters(reportInterval, AlgoType.NormalGaussian, 1, reporter, keyword, 1, withBackup = withBackup), urEndDate, urStartDate, reportInterval)
