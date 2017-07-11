@@ -170,7 +170,10 @@ object Stats extends App {
          |       pk/(2* $b*$b) * y3($b- y(l,k,x)) + \\
          |       -sumy* y(l,k,x) + const)
          |
-       """.stripMargin
+         |profit(R,a0,a1,x) = (x - a0)/(a1*R)
+         |
+         |plot [1.8:$l] \\
+       """.stripMargin.trim
 
     println(string)
     j until Pr.size foreach { k =>
@@ -182,9 +185,11 @@ object Stats extends App {
 
       val gl = l - (k - j + 1) * b
       val gh = l - (k  -j)*b
-      val plot = s"plot [$gl:$gh] E($k, $R,$l, $alpha, $a0, $a1, $pk, $sumy,$const,x)"
+      val plot = s"$gl <= x ? E($k, $R,$l, $alpha, $a0, $a1, $pk, $sumy,$const,x) : (\\"
       println(plot)
     }
+    print(s"profit($R,$a0,$a1,x)")
+    j until Pr.size foreach ( _ => print(")"))
   }
 
   def useNormalizedLinearFunction(C: Double, stdDev: Double, alpha: Double): Unit = {
