@@ -150,6 +150,46 @@ object Stats extends App {
 
   }
 
+  def useHistogram(l: Double, alpha: Double, a0: Double, a1: Double): Unit = {
+    val R = 100.0
+    val Pr = Seq(0.01, 0.03, 0.12, 0.34, 0.26, 0.22, 0.02)
+    val b = 0.1
+    val j = 3
+
+    val string =
+      s"""
+         |set key left box
+         |set autoscale
+         |set samples 800
+         |set terminal postscript eps enhanced size 3in,3in
+         |
+         |g(x)=$a1*x+$a0
+         |f(l, k, g) = l - (k - $j)*$b - g
+         |y3(x) = x*x*x
+         |E(k, R,l,  alpha, a0, a1, pk, sumy, const, g) = (g-a0)/(a1*R) - alpha/l * ( \\
+         |       pk/(2* $b*$b) * y3($b- f(l,k,g)) + \\
+         |       -sumy* f(l,k,g) + const)
+         |
+         |plot [0:$l]  \\
+       """.stripMargin.trim
+
+    println(string)
+    j until Pr.size foreach { k =>
+      val pk = Pr(k)
+      val sumy = Pr.slice(k + 1, Pr.size).sum
+      val const = Pr.zipWithIndex.slice(k + 1, Pr.size).map {
+        case (p, i) => b * p * (0.5 + i - k)
+      }.sum
+
+      val gl = l - (k - j + 1) * b
+      val gh = l - (k  -j)*b
+      val plot = s" ($gl <= x < $gh ?  E($k, $R,$l, $alpha, $a0, $a1, $pk, $sumy,$const,x) : \\"
+      println(plot)
+    }
+    print(0)
+    j until Pr.size foreach (k => print(")"))
+  }
+
   def useNormalizedLinearFunction(C: Double, stdDev: Double, alpha: Double): Unit = {
     val norm = new NormalDistribution(0, stdDev)
     val b = norm.density(0)
@@ -225,22 +265,23 @@ object Stats extends App {
 
   val obs: WeightedObservedPoints = new WeightedObservedPoints()
   Seq((1, 0.5), (7, 3.9), (2, 1.8)).foreach(x => obs.add(x._1, x._2))
-//  val coeff = linearFitting(obs)
+  //  val coeff = linearFitting(obs)
   val coeff = Coeff(0.33548, 0.51935)
-//  println(coeff)
+  //  println(coeff)
   val variance = calcVariance(obs, coeff)
   //    val variance = 0.25
   //  val stdDev = Math.sqrt(variance)
   val stdDev = 1
-  println(variance, stdDev)
+//  println(variance, stdDev)
 
   val C = 2.2
   Seq(1).foreach { alpha =>
     //  useNormalizedLinearFunction(C, stdDev, alpha)
     //  useOneLinearFunction(C, stdDev, alpha, coeff.a0, coeff.a1)
-        useRealGaussian(C, stdDev, alpha, coeff.a0, coeff.a1)
-//    val px = useHistogramUniformFunction(100, 2, 0.2, 0.3, 0.5, alpha, Seq(0.35, 0.26, 0.24, 0.01))
-//    println(px)
+//    useRealGaussian(C, stdDev, alpha, coeff.a0, coeff.a1)
+    useHistogram(C, 1, 0.55, 1.0)
+    //    val px = useHistogramUniformFunction(100, 2, 0.2, 0.3, 0.5, alpha, Seq(0.35, 0.26, 0.24, 0.01))
+    //    println(px)
   }
 }
 
@@ -329,8 +370,11 @@ object TestDouble extends App {
     (2.2, 2.76)
   ).foreach(x => obs.add(x._1.toDouble, x._2.toDouble))
 
-  val coeff = Stats.linearFitting(obs)
-  println(coeff)
+  //  val coeff = Stats.linearFitting(obs)
+  val filter: PolynomialCurveFitter = PolynomialCurveFitter.create(1)
+  val ret = filter.fit(obs.toList)
+  //    Coeff(ret(0), ret(1))
+  println(ret.toList)
 }
 
 object TestHistorgram extends App {
