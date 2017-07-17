@@ -151,10 +151,13 @@ object Stats extends App {
   }
 
   def useHistogram(l: Double, alpha: Double, a0: Double, a1: Double): Unit = {
+
     val R = 100.0
     val Pr = Seq(0.01, 0.03, 0.12, 0.34, 0.26, 0.22, 0.02)
     val b = 0.1
     val j = 3
+    val lowX = (1.7 - a0) / a1
+    val highX = (l - a0) / a1
 
     val string =
       s"""
@@ -166,13 +169,14 @@ object Stats extends App {
          |g(x)=$a1*x+$a0
          |y(l, k, x) = l - (k - $j)*$b - x
          |y3(x) = x*x*x
-         |E(k, R,l,  alpha, a0, a1, pk, sumy, const, x) = (l - y(l,k,x) - a0 - (k-$j)*$b) / (a1*R) - alpha/l * ( \\
-         |       pk/(2* $b*$b) * y3($b- y(l,k,x)) + \\
-         |       -sumy* y(l,k,x) + const)
+         |E(k, R,l,  alpha, a0, a1, pk, sumy, const, x) = (l - y(l,k, g(x)) - a0 - (k-$j)*$b) / (a1*R) - alpha/l * ( \\
+         |       pk/(2* $b*$b) * y3($b- y(l,k,g(x))) + \\
+         |       -sumy* y(l,k,g(x)) + const)
          |
          |profit(R,a0,a1,x) = (x - a0)/(a1*R)
+         |profit(R,x) = x/R
          |
-         |plot [1.8:$l] \\
+         |plot [$lowX:$highX] \\
        """.stripMargin.trim
 
     println(string)
@@ -183,13 +187,39 @@ object Stats extends App {
         case (p, i) => b * p * (0.5 + i - k)
       }.sum
 
+      val co = 3 * pk / 2 / (b * b)
+      val square = 1 / co * (l / (R * a1 * alpha) - sumy)
+      if (square >= 0 && square <= b) {
+        val y = b - Math.sqrt(square)
+        val g = l - (k - j) * b - y
+        val x = (g - a0) / a1
+        val ex = x / R - alpha / l * (pk / (2 * b * b) * (b - y) * (b - y) * (b - y) - sumy * y + const)
+        println(s"k=$k y==$y || g== $g || x===$x || ex===$ex")
+      }
+
+
       val gl = l - (k - j + 1) * b
-      val gh = l - (k  -j)*b
-      val plot = s"$gl <= x ? E($k, $R,$l, $alpha, $a0, $a1, $pk, $sumy,$const,x) : (\\"
-      println(plot)
+      val gh = l - (k - j) * b
+      val xl = (gl - a0) / a1
+      val xh = (gh - a0) / a1
+
+      def y(g: Double) = l - g - (k - j) * b
+
+      def g(x: Double) = a1 * x + a0
+
+      def y3(x: Double) = x * x * x
+
+      def ex(x: Double) = x / R - alpha / l * (pk / (2 * b * b) * y3(b - y(g(x))) - sumy * y(g(x)) + const)
+
+      println(s"k=$k || y==${y(g(xl))} || xl==$xl || ex==${ex(xl)}")
+      println(s"k=$k || y==${y(g(xh))} || xh==$xh || ex==${ex(xh)}")
+
+      val plot = s"$xl <= x ? E($k, $R,$l, $alpha, $a0, $a1, $pk, $sumy,$const,x) : (\\"
+      //      println(plot)
     }
-    print(s"profit($R,$a0,$a1,x)")
-    j until Pr.size foreach ( _ => print(")"))
+    //    print(s"profit($R,$a0,$a1,x)")
+    print(s"profit($R,x)")
+    j until Pr.size foreach (_ => print(")"))
   }
 
   def useNormalizedLinearFunction(C: Double, stdDev: Double, alpha: Double): Unit = {
@@ -251,18 +281,66 @@ object Stats extends App {
         0
       }
     }
+
+    override def toString: String = {
+      return posCounts.toString() + s", sum:$sum"
+    }
   }
 
-  def useHistogramUniformFunction(range: Double, W: Double, b: Double, a0: Double, a1: Double, alpha: Double, probs: Seq[Double]): Seq[Double] = {
-    val b2 = b * b
-    val seqIntegral: Seq[Double] = 1 to probs.size map (i => 0.5 * b2 + (i - 1) * b2)
-    //    println(seqIntegral)
+  def useHistogramUniformFunction(R: Double, W: Double, b: Double, a0: Double, a1: Double, alpha: Double, probs: Seq[Double]): Double = {
+    def y(g: Double, k: Int) = W - g - (k - 0) * b
 
-    def value(j: Int) = probs.slice(j, probs.size).zip(seqIntegral).map { case (p: Double, v: Double) => p * v }.sum
+    def g(x: Double) = a1 * x + a0
 
-    //        0 to (probs.size - 1) foreach (j => println(s"gain:${(W - j * b - a0) / (a1 * range)}, penalty:alpha * ${value(j)/W} = ${alpha / W * value(j)}"))
+    def y3(x: Double) = x * x * x
 
-    0 to (probs.size - 1) map (j => (W - j * b - a0) / (a1 * range) - (alpha / b / W) * value(j))
+    def exp(x: Double, k: Int, pk: Double, sumy: Double, const: Double) = x / R - alpha / W * (pk / (2 * b * b) * y3(b - y(g(x), k)) - sumy * y(g(x), k) + const)
+
+    Common.time {
+      val seqRxEpx: Seq[(Double, Double)] = 0 until (probs.size - 1) map { k =>
+        val pk = probs(k)
+        val sumy = probs.slice(k + 1, probs.size).sum
+        val const = probs.zipWithIndex.slice(k + 1, probs.size).map {
+          case (p, i) => b * p * (0.5 + i - k)
+        }.sum
+
+        val co = 3 * pk / 2 / (b * b)
+        val square = 1 / co * (W / (R * a1 * alpha) - sumy)
+        if (square >= 0 && square <= b) {
+          val y = b - Math.sqrt(square)
+          val g = W - (k - W) * b - y
+          val x = (g - a0) / a1
+          val ex = exp(x, k, pk, sumy, const)
+          //          println(s"k=$k y==$y || g== $g || x===$x || ex===$ex")
+          (x, ex)
+        } else {
+          val gl = W - (k - 0 + 1) * b
+          val gh = W - (k - 0) * b
+          val xl = (gl - a0) / a1
+          val xh = (gh - a0) / a1
+          val exLow = exp(xl, k, pk, sumy, const)
+          val exHigh = exp(xh, k, pk, sumy, const)
+          if (exLow > exHigh) {
+            (xl, exLow)
+          } else {
+            (xh, exHigh)
+          }
+        }
+      }
+      val max = seqRxEpx.maxBy(p => p._2)._1
+      Math.max(0, max)
+    }
+
+
+    //    val b2 = b * b
+    //    val seqIntegral: Seq[Double] = 1 to probs.size map (i => 0.5 * b2 + (i - 1) * b2)
+    //        println(seqIntegral)
+    //
+    //    def value(j: Int) = probs.slice(j, probs.size).zip(seqIntegral).map { case (p: Double, v: Double) => p * v }.sum
+    //
+    //            0 to (probs.size - 1) foreach (j => println(s"gain:${(W - j * b - a0) / (a1 * range)}, penalty:alpha * ${value(j)/W} = ${alpha / W * value(j)}"))
+    //
+    //    0 to (probs.size - 1) map (j => (W - j * b - a0) / (a1 * range) - (alpha / b / W) * value(j))
   }
 
   val obs: WeightedObservedPoints = new WeightedObservedPoints()
@@ -274,13 +352,13 @@ object Stats extends App {
   //    val variance = 0.25
   //  val stdDev = Math.sqrt(variance)
   val stdDev = 1
-//  println(variance, stdDev)
+  //  println(variance, stdDev)
 
   val C = 2.2
   Seq(1).foreach { alpha =>
     //  useNormalizedLinearFunction(C, stdDev, alpha)
     //  useOneLinearFunction(C, stdDev, alpha, coeff.a0, coeff.a1)
-//    useRealGaussian(C, stdDev, alpha, coeff.a0, coeff.a1)
+    //    useRealGaussian(C, stdDev, alpha, coeff.a0, coeff.a1)
     useHistogram(C, 1, 0.55, 1.0)
     //    val px = useHistogramUniformFunction(100, 2, 0.2, 0.3, 0.5, alpha, Seq(0.35, 0.26, 0.24, 0.01))
     //    println(px)
@@ -380,16 +458,15 @@ object TestDouble extends App {
 }
 
 object TestHistorgram extends App {
-  val b = 0.5
-  val alpha = 0.1
-  val W = 2
-  val a0 = 0.2
+  val b = 500
+  val W = 2000
   val histo = new Stats.Histogram(b)
-  Seq(-1792, -907, -1040, 383, 290, 414, 1098, 637, 3000).foreach(d => histo += (d / 1000.0))
+  Seq(-1792, -907, -1040, 383, 290, 414, 1098, 637, 3000).foreach(d => histo += d)
   val n = (W / b).toInt
   val probs = ((0 to (n - 1)).map(histo.prob) ++ Seq(histo.cumProb(n)))
+  println(histo)
   println(probs)
 
-  //  val exp = Stats.useHistogramUniformFunction(W, b, a0, alpha, probs)
-  //  println(exp)
+//    val exp = Stats.useHistogramUniformFunction(W, b, a0, alpha, probs)
+//    println(exp)
 }

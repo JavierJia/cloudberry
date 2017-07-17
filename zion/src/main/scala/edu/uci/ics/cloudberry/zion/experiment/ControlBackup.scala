@@ -35,11 +35,10 @@ object ControlBackup extends App with Connection {
   }
 
 
-  class Scheduler extends FSM[Scheduler.SchedulerState, Scheduler.SchedulerData] {
+  class Scheduler(val riskFullHistory: mutable.Builder[Common.QueryStat, List[Common.QueryStat]]) extends FSM[Scheduler.SchedulerState, Scheduler.SchedulerData] {
 
     import Scheduler._
 
-    val riskFullHistory = List.newBuilder[QueryStat]
     val backupFullHistory = List.newBuilder[QueryStat]
 
     var sumRisk = 0
@@ -164,7 +163,7 @@ object ControlBackup extends App with Connection {
         val nextLimit = if (data.panicTimeOut) {
           data.request.parameters.reportInterval
         } else {
-          if (data.request.reportLimit > result.mills) {  // only for the case of no backup queries
+          if (data.request.reportLimit > result.mills) { // only for the case of no backup queries
             data.request.parameters.reportInterval + data.request.reportLimit - result.mills
           } else {
             data.request.parameters.reportInterval
@@ -323,7 +322,7 @@ object ControlBackup extends App with Connection {
         this.from = from
         this.count += count
         //        this.json = mergeJSONArray(this.json, json, Seq("day", "state"), "count")
-//        this.json = mergeJSONArray(this.json, json, Seq("day"), "count")
+        //        this.json = mergeJSONArray(this.json, json, Seq("day"), "count")
         this.json = mergeCount(this.json, json)
       }
 
@@ -336,7 +335,7 @@ object ControlBackup extends App with Connection {
       }
     }
 
-    def mergeCount(jsLeft: JsArray, jsRight: JsArray): JsArray ={
+    def mergeCount(jsLeft: JsArray, jsRight: JsArray): JsArray = {
       val count = (jsLeft \ "count").asOpt[Int].getOrElse(0) + (jsRight \ "count").asOpt[Int].getOrElse(0)
       JsArray(Seq(JsObject(Seq("count" -> JsNumber(count)))))
     }
@@ -455,33 +454,35 @@ object ControlBackup extends App with Connection {
 
     import Scheduler._
 
-    for (reportInterval <- Seq(2000)) {
-      for (withBackup <- Seq(true, false)) {
-        for (keyword <- Seq("clinton","election")) {
-          val scheduler = system.actorOf(Props(new Scheduler()))
-          val reporter = system.actorOf(Props(new Reporter(keyword, reportInterval millis)))
-          scheduler ! Request(Parameters(reportInterval, AlgoType.NormalGaussian, 1, reporter, keyword, 1, withBackup = withBackup), urEndDate, urStartDate, reportInterval)
-          breakable {
-            while (true) {
-              implicit val timeOut: Timeout = Timeout(15 seconds)
-              (Await.result(scheduler ? CheckState, Duration.Inf)).asInstanceOf[SchedulerState] match {
-                case Idle =>
-                  scheduler ! PoisonPill
-                  workerLog.info(s"DONE $keyword, reportInterval:$reportInterval, withBackup: $withBackup")
-                  Thread.sleep(5000)
-                  break
-                case any =>
-                  workerLog.info(s"CheckState is $any")
-                  Thread.sleep(5000)
+    val fullHistory = List.newBuilder[QueryStat]
+    for (algo <- Seq(AlgoType.Baseline,AlgoType.NormalGaussian,AlgoType.Histogram)) {
+      for (reportInterval <- Seq(2000)) {
+        for (withBackup <- Seq(false)) {
+          for (keyword <- Seq("clinton","rain","happy")) {
+            val scheduler = system.actorOf(Props(new Scheduler(fullHistory)))
+            val reporter = system.actorOf(Props(new Reporter(keyword, reportInterval millis)))
+            scheduler ! Request(Parameters(reportInterval, algo, 1, reporter, keyword, 1, withBackup = withBackup), urEndDate, urStartDate, reportInterval)
+            breakable {
+              while (true) {
+                implicit val timeOut: Timeout = Timeout(15 seconds)
+                (Await.result(scheduler ? CheckState, Duration.Inf)).asInstanceOf[SchedulerState] match {
+                  case Idle =>
+                    scheduler ! PoisonPill
+                    workerLog.info(s"DONE $keyword, reportInterval:$reportInterval, withBackup: $withBackup")
+                    Thread.sleep(5000)
+                    break
+                  case any =>
+                    workerLog.info(s"CheckState is $any")
+                    Thread.sleep(5000)
+                }
               }
             }
-          }
 
+          }
         }
       }
     }
   }
-
 
   process
   exit()

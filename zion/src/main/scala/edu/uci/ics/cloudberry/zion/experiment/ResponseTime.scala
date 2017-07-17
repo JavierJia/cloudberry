@@ -27,7 +27,7 @@ trait Connection {
   //  val numberLSMs = 965
   val numberLSMs = 267
   val timeRange: Double = 1572.0
-//  val unit = new Duration(urStartDate, urEndDate).dividedBy(numberLSMs).getStandardHours
+  //  val unit = new Duration(urStartDate, urEndDate).dividedBy(numberLSMs).getStandardHours
   val unit = 1
 
   //  val keywords = Seq("zika", "flood", "election", "clinton", "trump", "happy", "")
@@ -191,104 +191,6 @@ object ResponseTime extends App with Connection {
     //    elasticTimeDouble()
     elasticTimeGap()
 
-    def elasticTimeDouble(): Unit = {
-      val terminate = urStartDate
-      1 to 1 foreach { runs =>
-        Seq(AlgoType.Baseline).foreach { algo =>
-          val alpha = Math.pow(2, runs - 1)
-          val requireTime = 2000
-          val fullHistory = List.newBuilder[QueryStat]
-
-          for (keyword <- keywords) {
-            val history = List.newBuilder[QueryStat]
-            val weight = List.newBuilder[Long]
-            weight += 1
-            weight += 1
-
-            var penalty = 0
-            var sumPenalty = 0
-            var numQuery = 0
-
-            def streamRun(endTime: DateTime, limit: Int): Stream[(DateTime, Int)] = {
-
-              val start0 = endTime.minusHours(unit.toInt)
-              numQuery += 1
-              val aql0 = getGroupByDateAndStateAQL(start0, unit.toInt, if (keyword.length > 0) Some(keyword) else None)
-              val (runTime0, _, count0) = multipleTime(0, aql0)
-              print(s"$algo,$alpha,$start0,$unit,$keyword,$limit,$limit,$runTime0,$count0")
-
-              history += QueryStat(limit, unit.toInt, runTime0.toInt)
-              fullHistory += QueryStat(limit, unit.toInt, runTime0.toInt)
-
-              val restLimit = limit - runTime0.toInt
-              var runTimeTotal = runTime0
-              var start = start0
-
-              var nextLimit = requireTime
-
-              if (runTime0 > limit) {
-                penalty += 1
-                sumPenalty += runTime0.toInt - limit
-                nextLimit = requireTime
-                println(",0 missed")
-              } else {
-                println(",0 done")
-
-                if (restLimit > runTime0) { // can run another query
-                  val (nextRangeModel, estTarget) = estimateInGeneral(restLimit.toInt, alpha, history.result(), fullHistory.result(), algo)
-                  val nextRangeLast = (Math.ceil(restLimit * unit / runTime0.toDouble)).toInt
-                  val nextRange = Math.min(nextRangeModel, nextRangeLast)
-                  val start1 = start0.minusHours(nextRange.toInt)
-                  val aql1 = getGroupByDateAndStateAQL(start1, nextRange.toInt, if (keyword.length > 0) Some(keyword) else None)
-                  numQuery += 1
-                  val (runTime1, _, count1) = multipleTime(0, aql1)
-
-                  runTimeTotal += runTime1
-                  start = start1
-
-                  history += QueryStat(restLimit, nextRange.toInt, runTime1.toInt)
-                  fullHistory += QueryStat(restLimit, nextRange.toInt, runTime1.toInt)
-                  print(s"$algo,$alpha,$start1,${nextRange.toInt},$keyword,$limit,$restLimit,$runTime1,$count1")
-
-                  if (runTime1 <= restLimit) { // on time
-                    nextLimit = requireTime + limit - runTimeTotal.toInt
-                    println(",1 ontime")
-                  } else { // overtime
-                    if (runTime1 > restLimit + requireTime) { // late than the next boundary
-                      penalty += 1
-                      sumPenalty += runTime1.toInt - restLimit - requireTime
-                      nextLimit = requireTime
-                      println(",1 missed")
-                    } else { // late OK
-                      nextLimit = requireTime + (requireTime + restLimit - runTime1.toInt)
-                      println(",1 late but OK")
-                    }
-                  }
-                } else {
-                  println(",0 too long to run 1")
-                  nextLimit = requireTime + limit - runTime0.toInt
-                }
-              }
-
-              (endTime, limit - runTimeTotal.toInt) #:: streamRun(start, nextLimit)
-            }
-
-            val tick = DateTime.now()
-
-            val list = streamRun(urEndDate, requireTime).takeWhile(_._1.getMillis > terminate.getMillis).toList
-            val tock = DateTime.now()
-            val totalTime = tock.getMillis - tick.getMillis
-            //          val (xa, xb) = linearInterpolation(history.result(), history.result().size)
-            val histo = history.result()
-            val variance = histo.map(h => (h.targetMS - h.actualMS) * (h.targetMS - h.actualMS)).sum.toDouble / histo.size
-            println("algorithm,alpha,requireTime,unit,keyword,numQuery,numPenalty,sumPenalty,totalTime,aveTime, variance")
-            println(s"$algo,$alpha,$requireTime,$unit,$keyword,${numQuery},${penalty},${-sumPenalty / 1000.0},${totalTime / 1000.0},${totalTime / numQuery / 1000.0}, $variance")
-            println()
-          }
-        }
-      }
-    }
-
     /** entry point */
     def elasticTimeGap(): Unit = {
 
@@ -296,13 +198,14 @@ object ResponseTime extends App with Connection {
       //        0.9 to 0.1 by -0.1 foreach { discount =>
       //      45 to 2600 by 5 foreach { minGap=>
       //      2 to 3 foreach { runs =>
+      val fullHistory = List.newBuilder[QueryStat]
       1 to 3 foreach { runs =>
-        Seq(AlgoType.Histogram, AlgoType.NormalGaussian, AlgoType.Baseline).foreach { algo =>
+        Seq(AlgoType.NormalGaussian, AlgoType.Histogram).foreach { algo =>
           val alpha = Math.pow(2, runs - 1)
           val requireTime = 2000
-          val fullHistory = List.newBuilder[QueryStat]
 
           for (keyword <- keywords) {
+//          for (keyword <- Seq("trump", "clinton", "rain")) {
             val history = List.newBuilder[QueryStat]
             val weight = List.newBuilder[Long]
             weight += 1
@@ -310,7 +213,7 @@ object ResponseTime extends App with Connection {
 
             def streamRun(endTime: DateTime, range: Int, limit: Int, target: Int): Stream[(DateTime, Int)] = {
               val start = endTime.minusHours(range)
-              val aql = getGroupByDateAndStateAQL(start, range, if (keyword.length > 0) Some(keyword) else None)
+              val aql = getCountOnlyAQL(start, range, if (keyword.length > 0) Some(keyword) else None)
               val (runTime, _, count) = multipleTime(0, aql)
 
               history += QueryStat(target, range, runTime.toInt)
@@ -347,7 +250,7 @@ object ResponseTime extends App with Connection {
   }
 
   def calcVariance(history: List[QueryStat]): Double = {
-//    history.takeRight(history.size - 3).map(h => (h.targetMS - h.actualMS) * (h.targetMS - h.actualMS)).sum.toDouble / history.size
+    //    history.takeRight(history.size - 3).map(h => (h.targetMS - h.actualMS) * (h.targetMS - h.actualMS)).sum.toDouble / history.size
     val underEstimates = history.filter(h => h.targetMS < h.actualMS)
     underEstimates.map(h => (h.targetMS - h.actualMS) * (h.targetMS - h.actualMS)).sum.toDouble / underEstimates.size
   }
@@ -359,11 +262,11 @@ object ResponseTime extends App with Connection {
     val nextRange = lastRange * limit / lastTime
 
     def validateRange(range: Double): Double = {
-      if (1 << localHistory.size < unit) {
+//      if (1 << localHistory.size < unit) {
         Math.max(1, Math.min(range.toInt, lastRange * 2))
-      } else {
-        Math.max(unit, Math.min(range.toInt, lastRange * 2))
-      }
+//      } else {
+//        Math.max(unit, Math.min(range.toInt, lastRange * 4))
+//      }
     }
 
     //      def validateRange(range: Double): Double = Math.max(1, range)
@@ -384,19 +287,24 @@ object ResponseTime extends App with Connection {
             //              println(s"range=$range,limit=$limit, o=$stdDev, a=$alpha, a0=${coeff.a0}, a1=${coeff.a1}")
             (range, range * coeff.a1 + coeff.a0)
           case AlgoType.Histogram =>
-            if (globalHistory.size < 20) {
+            if (globalHistory.size < 10) {
               val range = validateRange(Stats.getOptimalRx(timeRange, limit, stdDev, alpha, coeff.a0, coeff.a1))
               return (range, range * coeff.a1 + coeff.a0)
             }
             val b = 100
             val histo = new Stats.Histogram(b)
-            globalHistory.foreach(h => histo += h.actualMS - h.targetMS)
-            val probs: Seq[Double] = (0 to (limit / b - 1)).map(histo.prob) ++ Seq(histo.cumProb(limit / b))
-            val exp: Seq[Double] = Stats.useHistogramUniformFunction(timeRange, limit, b, coeff.a0, coeff.a1, alpha, probs)
-            val maxId = exp.zipWithIndex.maxBy(_._1)._2
-            val target = Math.max(0, limit - (maxId + 1) * b / 2)
-            val range = validateRange((target - coeff.a0) / coeff.a1)
-            (range, target)
+            globalHistory.foreach(h => {
+              val realDiff =  h.actualMS - h.targetMS
+              val diff = if (realDiff >= 0 ) realDiff else -b
+              histo += diff
+            })
+
+            val probs: Seq[Double] = (0 until (limit / b)).map(histo.prob) ++ Seq(histo.cumProb(limit / b))
+            val rx = validateRange(Stats.useHistogramUniformFunction(timeRange, limit, b, coeff.a0, coeff.a1, alpha, probs))
+            //            val maxId = exp.zipWithIndex.maxBy(_._1)._2
+            //            val target = Math.max(0, limit - (maxId + 1) * b / 2)
+            //            val range = validateRange((target - coeff.a0) / coeff.a1)
+            (rx, rx * coeff.a1 + coeff.a0)
           case AlgoType.Baseline =>
             val range = Math.max(1, (limit - coeff.a0) / coeff.a1)
             (range, limit)
@@ -448,9 +356,9 @@ object ResponseTime extends App with Connection {
     val byDay = ByStatement(TimeField("create_at"), Some(Interval(TimeUnit.Hour, 4)), Some(NumberField("day")))
     val byState = ByStatement(NumberField("geo_tag.stateID"), None, Some(NumberField("state")))
     val groupStatement = GroupStatement(Seq(byDay, byState), Seq(aggrCount))
-//    val groupStatement = GroupStatement(Seq(byDay), Seq(aggrCount))
+    //    val groupStatement = GroupStatement(Seq(byDay), Seq(aggrCount))
     val query = Query(dataset = "twitter.ds_tweet", filter = filters, groups = Some(groupStatement))
-//    val query = Query(dataset = "twitter.ds_tweet", filter = filters, globalAggr = Some(globalAggr))
+    //    val query = Query(dataset = "twitter.ds_tweet", filter = filters, globalAggr = Some(globalAggr))
     queryGen.generate(query, Map(TwitterDataStore.DatasetName -> TwitterDataStore.TwitterSchema))
   }
 
@@ -460,9 +368,9 @@ object ResponseTime extends App with Connection {
       Seq(TimeField.TimeFormat.print(start),
         TimeField.TimeFormat.print(start.plusHours(rangeInHour))))
     val filters = keywordFilter.map(Seq(timeFilter, _)).getOrElse(Seq(timeFilter))
-//    val byDay = ByStatement(TimeField("create_at"), Some(Interval(TimeUnit.Day)), Some(NumberField("day")))
-//    val groupStatement = GroupStatement(Seq(byDay), Seq(aggrCount))
-//    val groupStatement = GroupStatement(Seq(byDay), Seq(aggrCount))
+    //    val byDay = ByStatement(TimeField("create_at"), Some(Interval(TimeUnit.Day)), Some(NumberField("day")))
+    //    val groupStatement = GroupStatement(Seq(byDay), Seq(aggrCount))
+    //    val groupStatement = GroupStatement(Seq(byDay), Seq(aggrCount))
     val query = Query(dataset = "twitter.ds_tweet", filter = filters, globalAggr = Some(globalAggr))
     queryGen.generate(query, Map(TwitterDataStore.DatasetName -> TwitterDataStore.TwitterSchema))
   }
