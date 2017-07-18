@@ -454,7 +454,7 @@ object ControlBackup extends App with Connection {
 
     import Scheduler._
 
-    for (alpha <- Seq(1,2,4)) {
+    for (alpha <- Seq(1, 2, 4)) {
       for (algo <- Seq(AlgoType.Baseline, AlgoType.NormalGaussian, AlgoType.Histogram)) {
         for (reportInterval <- Seq(2000)) {
           for (withBackup <- Seq(false)) {
@@ -519,3 +519,4 @@ object ControlBackup extends App with Connection {
 
 
   }
+}
