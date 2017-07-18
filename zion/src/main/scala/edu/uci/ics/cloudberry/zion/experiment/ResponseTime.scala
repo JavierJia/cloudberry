@@ -288,8 +288,10 @@ object ResponseTime extends App with Connection {
             (range, range * coeff.a1 + coeff.a0)
           case AlgoType.Histogram =>
             if (globalHistory.size < 10) {
-              val range = validateRange(Stats.getOptimalRx(timeRange, limit, stdDev, alpha, coeff.a0, coeff.a1))
-              return (range, range * coeff.a1 + coeff.a0)
+              val rawRange = Stats.getOptimalRx(timeRange, limit, stdDev, alpha, coeff.a0, coeff.a1)
+              val range = validateRange(rawRange)
+              val rst = (range, range * coeff.a1 + coeff.a0)
+              return rst
             }
             val b = 100
             val histo = new Stats.Histogram(b)
@@ -299,11 +301,17 @@ object ResponseTime extends App with Connection {
               histo += diff
             })
 
+            val rawRange = Stats.getOptimalRx(timeRange, limit, stdDev, alpha, coeff.a0, coeff.a1)
+            val rst = (rawRange, rawRange * coeff.a1 + coeff.a0)
+
             val probs: Seq[Double] = (0 until (limit / b)).map(histo.prob) ++ Seq(histo.cumProb(limit / b))
-            val rx = validateRange(Stats.useHistogramUniformFunction(timeRange, limit, b, coeff.a0, coeff.a1, alpha, probs))
+            val rawRx = Stats.useHistogramUniformFunction(timeRange, limit, b, coeff.a0, coeff.a1, alpha, probs)
+            val rx = validateRange(rawRx)
             //            val maxId = exp.zipWithIndex.maxBy(_._1)._2
             //            val target = Math.max(0, limit - (maxId + 1) * b / 2)
             //            val range = validateRange((target - coeff.a0) / coeff.a1)
+            val histoIsBig = rawRx > rst._1
+            println(s"normal: ${rst._1}, g:${rst._2}; histo: ${rawRx}, g:${rawRx*coeff.a1 + coeff.a0} histoIsBig:$histoIsBig")
             (rx, rx * coeff.a1 + coeff.a0)
           case AlgoType.Baseline =>
             val range = Math.max(1, (limit - coeff.a0) / coeff.a1)

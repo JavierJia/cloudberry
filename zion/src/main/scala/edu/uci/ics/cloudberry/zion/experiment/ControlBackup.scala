@@ -454,38 +454,68 @@ object ControlBackup extends App with Connection {
 
     import Scheduler._
 
-    val fullHistory = List.newBuilder[QueryStat]
-    for (algo <- Seq(AlgoType.Baseline,AlgoType.NormalGaussian,AlgoType.Histogram)) {
-      for (reportInterval <- Seq(2000)) {
-        for (withBackup <- Seq(false)) {
-          for (keyword <- Seq("clinton","rain","happy")) {
-            val scheduler = system.actorOf(Props(new Scheduler(fullHistory)))
-            val reporter = system.actorOf(Props(new Reporter(keyword, reportInterval millis)))
-            scheduler ! Request(Parameters(reportInterval, algo, 1, reporter, keyword, 1, withBackup = withBackup), urEndDate, urStartDate, reportInterval)
-            breakable {
-              while (true) {
-                implicit val timeOut: Timeout = Timeout(15 seconds)
-                (Await.result(scheduler ? CheckState, Duration.Inf)).asInstanceOf[SchedulerState] match {
-                  case Idle =>
-                    scheduler ! PoisonPill
-                    workerLog.info(s"DONE $keyword, reportInterval:$reportInterval, withBackup: $withBackup")
-                    Thread.sleep(5000)
-                    break
-                  case any =>
-                    workerLog.info(s"CheckState is $any")
-                    Thread.sleep(5000)
+    for (alpha <- Seq(1,2,4)) {
+      for (algo <- Seq(AlgoType.Baseline, AlgoType.NormalGaussian, AlgoType.Histogram)) {
+        for (reportInterval <- Seq(2000)) {
+          for (withBackup <- Seq(false)) {
+            for (keyword <- Seq("zika", "election", "rain", "happy", "")) {
+              val fullHistory = List.newBuilder[QueryStat]
+              val scheduler = system.actorOf(Props(new Scheduler(fullHistory)))
+              val reporter = system.actorOf(Props(new Reporter(keyword, reportInterval millis)))
+              scheduler ! Request(Parameters(reportInterval, algo, alpha, reporter, keyword, 1, withBackup = withBackup), urEndDate, urStartDate, reportInterval)
+              breakable {
+                while (true) {
+                  implicit val timeOut: Timeout = Timeout(15 seconds)
+                  (Await.result(scheduler ? CheckState, Duration.Inf)).asInstanceOf[SchedulerState] match {
+                    case Idle =>
+                      scheduler ! PoisonPill
+                      workerLog.info(s"DONE $keyword, reportInterval:$reportInterval, withBackup: $withBackup")
+                      Thread.sleep(5000)
+                      break
+                    case any =>
+                      workerLog.info(s"CheckState is $any")
+                      Thread.sleep(5000)
+                  }
                 }
               }
-            }
 
+            }
+          }
+        }
+      }
+
+      val fullHistory = List.newBuilder[QueryStat]
+      for (algo <- Seq(AlgoType.Baseline, AlgoType.NormalGaussian, AlgoType.Histogram)) {
+        for (reportInterval <- Seq(2000)) {
+          for (withBackup <- Seq(false)) {
+            for (keyword <- Seq("zika", "election", "rain", "happy", "")) {
+              val scheduler = system.actorOf(Props(new Scheduler(fullHistory)))
+              val reporter = system.actorOf(Props(new Reporter(keyword, reportInterval millis)))
+              scheduler ! Request(Parameters(reportInterval, algo, alpha, reporter, keyword, 1, withBackup = withBackup), urEndDate, urStartDate, reportInterval)
+              breakable {
+                while (true) {
+                  implicit val timeOut: Timeout = Timeout(15 seconds)
+                  (Await.result(scheduler ? CheckState, Duration.Inf)).asInstanceOf[SchedulerState] match {
+                    case Idle =>
+                      scheduler ! PoisonPill
+                      workerLog.info(s"DONE $keyword, reportInterval:$reportInterval, withBackup: $withBackup")
+                      Thread.sleep(5000)
+                      break
+                    case any =>
+                      workerLog.info(s"CheckState is $any")
+                      Thread.sleep(5000)
+                  }
+                }
+              }
+
+            }
           }
         }
       }
     }
+
+    process
+    exit()
+
+
   }
-
-  process
-  exit()
-
-
-}

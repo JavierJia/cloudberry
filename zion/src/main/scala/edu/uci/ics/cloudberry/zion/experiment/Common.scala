@@ -15,7 +15,7 @@ object Common {
     val t0 = System.currentTimeMillis()
     val result = block    // call-by-name
     val t1 = System.currentTimeMillis()
-//    println("Elapsed time: " + (t1 - t0) + "ms")
+    println("Elapsed time: " + (t1 - t0) + "ms")
     result
   }
 
@@ -133,12 +133,12 @@ object Common {
         if (queue.nonEmpty) {
           val all = queue.dequeueAll(_ => true)
           val sum = all.map(_.count).last
-          reportLog.info(s"$keyword report result from ${all.map(_.start).last} of range ${all.map(_.range).last}, count ${sum}")
+          reportLog.info(s"summary: $keyword report result from ${all.map(_.start).last} of range ${all.map(_.range).last}, count ${sum}")
           numReports += 1
           outOpt.map(splitAndReport(_, all.last.json))
         }
         val totalTime = DateTime.now().getMillis - startTime.getMillis
-        reportLog.info(s"$keyword numOfReports: $numReports, sumTime: ${totalTime / 1000.0}, numOfFail: $numFailed, sumDelay: ${delayed / 1000.0}")
+        reportLog.info(s"summary: $keyword numOfReports: $numReports, sumTime: ${totalTime / 1000.0}, numOfFail: $numFailed, sumDelay: ${delayed / 1000.0}")
         reportLog.info(s"=============FIN===============")
         self ! PoisonPill
       }
