@@ -513,10 +513,10 @@ object ControlBackup extends App with Connection {
         }
       }
     }
-
-    process
-    exit()
-
-
   }
+
+  process
+  exit()
+
+
 }
