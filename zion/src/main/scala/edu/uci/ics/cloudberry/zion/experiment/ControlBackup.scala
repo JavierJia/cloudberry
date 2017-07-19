@@ -84,7 +84,7 @@ object ControlBackup extends App with Connection {
           val RangeAndEstTime(rRisk, estMills) = decideRRiskAndESTTime(endTime, till, waitingTimeOut, riskStats, parameters)
 
           val start = endTime.minusHours(rRisk)
-          val sql = ResponseTime.getCountOnlyAQL(start, rRisk, toOpt(parameters.keyword))
+          val sql = ResponseTime.getGroupByDateAndStateAQL(start, rRisk, toOpt(parameters.keyword))
           runAQuery(sql, DBResultType.RISK, start, endTime, rRisk, estMills) pipeTo self
 
           setTimer(WaitTimerName, WaitTimeOut, waitingTimeOut millis)
@@ -140,7 +140,7 @@ object ControlBackup extends App with Connection {
           val RangeAndEstTime(rBackup, estMills) = decideRBackAndESTTime(endTime, till, panicLimit, backupStats, parameters)
 
           val start = endTime.minusHours(rBackup)
-          val sql = ResponseTime.getCountOnlyAQL(start, rBackup, toOpt(parameters.keyword))
+          val sql = ResponseTime.getGroupByDateAndStateAQL(start, rBackup, toOpt(parameters.keyword))
           runAQuery(sql, DBResultType.BACKUP, start, endTime, rBackup, estMills) pipeTo self
 
           setTimer(PanicTimerName, PanicTimeOut, panicLimit millis)
@@ -321,10 +321,21 @@ object ControlBackup extends App with Connection {
         assert(to == this.from)
         this.from = from
         this.count += count
-        //        this.json = mergeJSONArray(this.json, json, Seq("day", "state"), "count")
+                this.json = mergeJSONArray(this.json, json, Seq("day", "state"), "count")
         //        this.json = mergeJSONArray(this.json, json, Seq("day"), "count")
-        this.json = mergeCount(this.json, json)
+//        this.json = mergeCount(this.json, json)
       }
+
+      def mergeByDayState(from: DateTime, to: DateTime, count: Int, json: JsArray): Unit = {
+        Logger.error(s"from:$from, to:$to, this.from:${this.from}, this.to:${this.to}")
+        assert(to == this.from)
+        this.from = from
+        this.count += count
+        this.json = mergeJSONArray(this.json, json, Seq("day", "state"), "count")
+//        this.json = mergeJSONArray(this.json, json, Seq("day"), "count")
+        //        this.json = mergeCount(this.json, json)
+      }
+
 
       def getRange: Int = {
         new TInterval(from, to).toDuration.getStandardHours.toInt

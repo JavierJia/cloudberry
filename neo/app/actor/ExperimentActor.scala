@@ -3,7 +3,7 @@ package actor
 import akka.actor.{Actor, ActorLogging, ActorRef, PoisonPill, Props}
 import akka.stream.Materializer
 import edu.uci.ics.cloudberry.zion.experiment.Common.Reporter.Fin
-import edu.uci.ics.cloudberry.zion.experiment.Common.{AlgoType, Parameters, Reporter}
+import edu.uci.ics.cloudberry.zion.experiment.Common.{AlgoType, Parameters, QueryStat, Reporter}
 import edu.uci.ics.cloudberry.zion.experiment.ControlBackup.Scheduler
 import edu.uci.ics.cloudberry.zion.experiment.ControlBackup.Scheduler.{Request, Rewind, UpdateInterval, UpdateWidth}
 import org.joda.time.DateTime
@@ -18,7 +18,8 @@ class ExperimentActor(out: ActorRef)(implicit ec: ExecutionContext, implicit val
   // build scheduler
   import ExperimentActor._
 
-  val scheduler = context.actorOf(Props(new Scheduler()))
+  val scheduler = context.actorOf(Props(new Scheduler(List.newBuilder[QueryStat])))
+
   var curReporter: Option[ActorRef] = None
 
   override def receive: Receive = {
