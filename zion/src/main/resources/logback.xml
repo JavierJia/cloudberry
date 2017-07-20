@@ -1,6 +1,6 @@
 <configuration>
 
-    <conversionRule conversionWord="coloredLevel" converterClass="play.api.libs.logback.ColoredLevel" />
+    <conversionRule conversionWord="coloredLevel" converterClass="play.api.libs.logback.ColoredLevel"/>
 
     <appender name="FILE" class="ch.qos.logback.core.FileAppender">
         <file>logs/test.log</file>
@@ -32,31 +32,41 @@
         </encoder>
     </appender>
 
+    <appender name="STATS" class="ch.qos.logback.core.FileAppender">
+        <file>logs/stats.log</file>
+        <encoder>
+            <pattern>%date [%level][%logger] - %message%n</pattern>
+        </encoder>
+    </appender>
+
     <logger name="report" level="INFO">
-        <appender-ref ref="REPORT" />
-        <appender-ref ref="FULL" />
+        <appender-ref ref="REPORT"/>
+        <appender-ref ref="FULL"/>
     </logger>
 
     <logger name="worker" level="INFO">
-        <appender-ref ref="FULL" />
+        <appender-ref ref="FULL"/>
     </logger>
 
+    <logger name="stats" level="INFO">
+        <appender-ref ref="STATS"/>
+    </logger>
 
-    <logger name="play" level="INFO" />
-    <logger name="application" level="DEBUG" />
+    <logger name="play" level="INFO"/>
+    <logger name="application" level="DEBUG"/>
 
     <!-- Off these ones as they are annoying, and anyway we manage configuration ourself -->
-    <logger name="com.avaje.ebean.config.PropertyMapLoader" level="OFF" />
+    <logger name="com.avaje.ebean.config.PropertyMapLoader" level="OFF"/>
     <logger name="akka.log-dead-letters-during-shutdown" level="OFF"/>
-    <logger name="com.avaje.ebeaninternal.server.core.XmlConfigLoader" level="OFF" />
-    <logger name="com.avaje.ebeaninternal.server.lib.BackgroundThread" level="OFF" />
-    <logger name="com.gargoylesoftware.htmlunit.javascript" level="OFF" />
+    <logger name="com.avaje.ebeaninternal.server.core.XmlConfigLoader" level="OFF"/>
+    <logger name="com.avaje.ebeaninternal.server.lib.BackgroundThread" level="OFF"/>
+    <logger name="com.gargoylesoftware.htmlunit.javascript" level="OFF"/>
     <logger name="io.netty" level="OFF"/>
     <logger name="org.asynchttpclient" level="OFF"/>
 
     <root level="DEBUG">
-        <appender-ref ref="STDOUT" />
-        <appender-ref ref="FILE" />
+        <appender-ref ref="STDOUT"/>
+        <appender-ref ref="FILE"/>
     </root>
 
 </configuration>

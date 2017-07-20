@@ -381,7 +381,8 @@ object ResponseTime extends App with Connection {
     //    val groupStatement = GroupStatement(Seq(byDay), Seq(aggrCount))
         val groupStatement = GroupStatement(Seq(byDay), Seq(aggrCount))
 //    val query = Query(dataset = "twitter.ds_tweet", filter = filters, globalAggr = Some(globalAggr))
-    val query = Query(dataset = "twitter.ds_tweet", filter = filters, groups = Some(groupStatement))
+//    val query = Query(dataset = "twitter.ds_tweet", filter = filters, groups = Some(groupStatement))
+    val query = Query(dataset = "twitter.ds_tweet_prefix", filter = filters, groups = Some(groupStatement))
     queryGen.generate(query, Map(TwitterDataStore.DatasetName -> TwitterDataStore.TwitterSchema))
   }
 
