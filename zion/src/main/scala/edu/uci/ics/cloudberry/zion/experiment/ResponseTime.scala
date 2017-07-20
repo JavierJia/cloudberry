@@ -205,7 +205,7 @@ object ResponseTime extends App with Connection {
           val requireTime = 2000
 
           for (keyword <- keywords) {
-//          for (keyword <- Seq("trump", "clinton", "rain")) {
+            //          for (keyword <- Seq("trump", "clinton", "rain")) {
             val history = List.newBuilder[QueryStat]
             val weight = List.newBuilder[Long]
             weight += 1
@@ -251,9 +251,10 @@ object ResponseTime extends App with Connection {
 
   def calcVariance(history: List[QueryStat]): Double = {
     //    history.takeRight(history.size - 3).map(h => (h.targetMS - h.actualMS) * (h.targetMS - h.actualMS)).sum.toDouble / history.size
-//    val underEstimates = history.filter(h => h.targetMS < h.actualMS)
-//    underEstimates.map(h => (h.targetMS - h.actualMS) * (h.targetMS - h.actualMS)).sum.toDouble / underEstimates.size
-      history.map(h => (h.targetMS - h.actualMS) * (h.targetMS - h.actualMS)).sum.toDouble / history.size
+    //    val underEstimates = history.filter(h => h.targetMS < h.actualMS)
+    //    underEstimates.map(h => (h.targetMS - h.actualMS) * (h.targetMS - h.actualMS)).sum.toDouble / underEstimates.size
+    val valid = history.filterNot(h => h.targetMS == Int.MaxValue)
+    valid.map(h => (h.targetMS - h.actualMS) * (h.targetMS - h.actualMS)).sum.toDouble / valid.size
   }
 
 
@@ -263,11 +264,11 @@ object ResponseTime extends App with Connection {
     val nextRange = lastRange * limit / lastTime
 
     def validateRange(range: Double): Double = {
-//      if (1 << localHistory.size < unit) {
-        Math.max(1, Math.min(range.toInt, lastRange * 2))
-//      } else {
-//        Math.max(unit, Math.min(range.toInt, lastRange * 4))
-//      }
+      //      if (1 << localHistory.size < unit) {
+      Math.max(1, Math.min(range.toInt, lastRange * 2))
+      //      } else {
+      //        Math.max(unit, Math.min(range.toInt, lastRange * 4))
+      //      }
     }
 
     //      def validateRange(range: Double): Double = Math.max(1, range)
@@ -285,7 +286,7 @@ object ResponseTime extends App with Connection {
         algoType match {
           case AlgoType.NormalGaussian =>
             val range = validateRange(Stats.getOptimalRx(timeRange, limit, stdDev, alpha, coeff.a0, coeff.a1))
-            //              println(s"range=$range,limit=$limit, o=$stdDev, a=$alpha, a0=${coeff.a0}, a1=${coeff.a1}")
+            println(s"range=$range,limit=$limit, o=$stdDev, a=$alpha, a0=${coeff.a0}, a1=${coeff.a1}")
             (range, range * coeff.a1 + coeff.a0)
           case AlgoType.Histogram =>
             if (globalHistory.size < 10) {
@@ -296,9 +297,9 @@ object ResponseTime extends App with Connection {
             }
             val b = 100
             val histo = new Stats.Histogram(b)
-            globalHistory.foreach(h => {
-              val realDiff =  h.actualMS - h.targetMS
-              val diff = if (realDiff >= 0 ) realDiff else -b
+            globalHistory.filterNot(_.targetMS == Int.MaxValue).foreach(h => {
+              val realDiff = h.actualMS - h.targetMS
+              val diff = if (realDiff >= 0) realDiff else -b
               histo += diff
             })
 
@@ -312,7 +313,7 @@ object ResponseTime extends App with Connection {
             //            val target = Math.max(0, limit - (maxId + 1) * b / 2)
             //            val range = validateRange((target - coeff.a0) / coeff.a1)
             val histoIsBig = rawRx > rst._1
-            println(s"normal: ${rst._1}, g:${rst._2}; histo: ${rawRx}, g:${rawRx*coeff.a1 + coeff.a0} histoIsBig:$histoIsBig")
+            println(s"normal: ${rst._1}, g:${rst._2}; histo: ${rawRx}, g:${rawRx * coeff.a1 + coeff.a0} histoIsBig:$histoIsBig")
             (rx, rx * coeff.a1 + coeff.a0)
           case AlgoType.Baseline =>
             val range = Math.max(1, (limit - coeff.a0) / coeff.a1)
@@ -372,18 +373,21 @@ object ResponseTime extends App with Connection {
   }
 
   def getCountOnlyAQL(start: DateTime, rangeInHour: Int, keyword: Option[String]): String = {
+//    val name = "twitter.ds_tweet_prefix"
+    val name = "twitter.ds_tweet"
     val keywordFilter = keyword.map(k => FilterStatement(TextField("text"), None, Relation.contains, Seq(k)))
     val timeFilter = FilterStatement(TimeField("create_at"), None, Relation.inRange,
       Seq(TimeField.TimeFormat.print(start),
         TimeField.TimeFormat.print(start.plusHours(rangeInHour))))
     val filters = keywordFilter.map(Seq(timeFilter, _)).getOrElse(Seq(timeFilter))
-        val byDay = ByStatement(TimeField("create_at"), Some(Interval(TimeUnit.Day)), Some(NumberField("day")))
+    val byDay = ByStatement(TimeField("create_at"), Some(Interval(TimeUnit.Day)), Some(NumberField("day")))
     //    val groupStatement = GroupStatement(Seq(byDay), Seq(aggrCount))
-        val groupStatement = GroupStatement(Seq(byDay), Seq(aggrCount))
-//    val query = Query(dataset = "twitter.ds_tweet", filter = filters, globalAggr = Some(globalAggr))
-//    val query = Query(dataset = "twitter.ds_tweet", filter = filters, groups = Some(groupStatement))
-    val query = Query(dataset = "twitter.ds_tweet_prefix", filter = filters, groups = Some(groupStatement))
-    queryGen.generate(query, Map(TwitterDataStore.DatasetName -> TwitterDataStore.TwitterSchema))
+    //    val groupStatement = GroupStatement(Seq(byDay), Seq(aggrCount))
+    //    val query = Query(dataset = "twitter.ds_tweet", filter = filters, globalAggr = Some(globalAggr))
+    val query = Query(dataset = name, filter = filters, globalAggr = Some(globalAggr))
+    //        val query = Query(dataset = "twitter.ds_tweet", filter = filters, groups = Some(groupStatement))
+    //    val query = Query(dataset = "twitter.ds_tweet_prefix", filter = filters, groups = Some(groupStatement))
+    queryGen.generate(query, Map(name -> TwitterDataStore.TwitterSchema))
   }
 
   exit()
