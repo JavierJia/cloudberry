@@ -251,8 +251,9 @@ object ResponseTime extends App with Connection {
 
   def calcVariance(history: List[QueryStat]): Double = {
     //    history.takeRight(history.size - 3).map(h => (h.targetMS - h.actualMS) * (h.targetMS - h.actualMS)).sum.toDouble / history.size
-    val underEstimates = history.filter(h => h.targetMS < h.actualMS)
-    underEstimates.map(h => (h.targetMS - h.actualMS) * (h.targetMS - h.actualMS)).sum.toDouble / underEstimates.size
+//    val underEstimates = history.filter(h => h.targetMS < h.actualMS)
+//    underEstimates.map(h => (h.targetMS - h.actualMS) * (h.targetMS - h.actualMS)).sum.toDouble / underEstimates.size
+      history.map(h => (h.targetMS - h.actualMS) * (h.targetMS - h.actualMS)).sum.toDouble / history.size
   }
 
 
