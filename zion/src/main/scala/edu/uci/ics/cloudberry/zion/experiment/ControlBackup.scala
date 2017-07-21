@@ -466,6 +466,8 @@ object ControlBackup extends App with Connection {
 
     for( i <- 1 to 5) {
       for (alpha <- Seq(1, 4, 16, 32)) {
+        val globalHistory = List.newBuilder[QueryStat]
+
         for (algo <- Seq(AlgoType.Baseline, AlgoType.NormalGaussian, AlgoType.Histogram)) {
           for (reportInterval <- Seq(2000)) {
             for (withBackup <- Seq(false)) {
@@ -489,17 +491,19 @@ object ControlBackup extends App with Connection {
                     }
                   }
                 }
+                globalHistory ++= fullHistory.result()
                 fullHistory.result().foreach(stat => statsLog.info(s"$algo,$keyword,${stat.actualMS},${stat.targetMS},${stat.actualMS - stat.targetMS}"))
               }
             }
           }
         }
 
-        val fullHistory = List.newBuilder[QueryStat]
         for (algo <- Seq(AlgoType.Baseline, AlgoType.NormalGaussian, AlgoType.Histogram)) {
           for (reportInterval <- Seq(2000)) {
             for (withBackup <- Seq(false)) {
               for (keyword <- Seq("zika", "election", "rain", "happy", "")) {
+                val fullHistory = List.newBuilder[QueryStat]
+                fullHistory ++= globalHistory.result()
                 val start = fullHistory.result().size
                 val scheduler = system.actorOf(Props(new Scheduler(fullHistory)))
                 val reporter = system.actorOf(Props(new Reporter(keyword, reportInterval millis)))
