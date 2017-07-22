@@ -285,8 +285,9 @@ object ResponseTime extends App with Connection {
         val coeff = trainLinearModel(localHistory)
         algoType match {
           case AlgoType.NormalGaussian =>
-            val range = validateRange(Stats.getOptimalRx(timeRange, limit, stdDev, alpha, coeff.a0, coeff.a1))
-            println(s"range=$range,limit=$limit, o=$stdDev, a=$alpha, a0=${coeff.a0}, a1=${coeff.a1}")
+            val rawRange = Stats.getOptimalRx(timeRange, limit, stdDev, alpha, coeff.a0, coeff.a1)
+            val range = validateRange(rawRange)
+            println(s"range=$rawRange,limit=$limit, o=$stdDev, a=$alpha, a0=${coeff.a0}, a1=${coeff.a1}")
             (range, range * coeff.a1 + coeff.a0)
           case AlgoType.Histogram =>
             if (globalHistory.size < 10) {

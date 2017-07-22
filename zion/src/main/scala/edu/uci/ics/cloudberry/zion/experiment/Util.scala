@@ -109,6 +109,7 @@ object Stats extends App {
       Rw
     } else {
       val z = Erf.erfInv(optimalValueZ)
+      println(s"optimal rx: ${(Math.sqrt(2) * stdDev * z + W - a0) / a1}")
       Math.min(Rw, Math.max(0, (Math.sqrt(2) * stdDev * z + W - a0) / a1))
     }
   }
