@@ -465,7 +465,7 @@ object ControlBackup extends App with Connection {
     import Scheduler._
 
     val isLocal = true
-    val isGlobal = false
+    val isGlobal = true
     for( i <- 1 to 4) {
       for (alpha <- Seq(10, 100, 1000, 10000)) {
         val globalHistory = List.newBuilder[QueryStat]
