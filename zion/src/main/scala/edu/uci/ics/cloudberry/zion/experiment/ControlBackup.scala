@@ -321,8 +321,8 @@ object ControlBackup extends App with Connection {
         assert(to == this.from)
         this.from = from
         this.count += count
-        //        this.json = mergeJSONArray(this.json, json, Seq("day"), "count")
-        this.json = mergeCount(this.json, json)
+        this.json = mergeJSONArray(this.json, json, Seq("day", "state"), "count")
+//        this.json = mergeCount(this.json, json)
       }
 
       def mergeByDayState(from: DateTime, to: DateTime, count: Int, json: JsArray): Unit = {

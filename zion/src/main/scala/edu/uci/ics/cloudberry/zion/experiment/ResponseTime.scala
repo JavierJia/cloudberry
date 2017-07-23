@@ -287,10 +287,10 @@ object ResponseTime extends App with Connection {
           case AlgoType.NormalGaussian =>
             val rawRange = Stats.getOptimalRx(timeRange, limit, stdDev, alpha, coeff.a0, coeff.a1)
             val range = validateRange(rawRange)
-//            for (i <- 1 to 10) {
-//              val mul = Math.pow(10, i)
-//              Stats.getOptimalRx(timeRange, limit, stdDev, alpha * mul, coeff.a0, coeff.a1)
-//            }
+            //            for (i <- 1 to 10) {
+            //              val mul = Math.pow(10, i)
+            //              Stats.getOptimalRx(timeRange, limit, stdDev, alpha * mul, coeff.a0, coeff.a1)
+            //            }
             debugLog.info(s"range=$rawRange, limit=$limit, o=$stdDev, a=$alpha, a0=${coeff.a0}, a1=${coeff.a1}")
             (range, range * coeff.a1 + coeff.a0)
           case AlgoType.Histogram =>
@@ -314,9 +314,9 @@ object ResponseTime extends App with Connection {
             val probs: Seq[Double] = (0 until (limit / b)).map(histo.prob) ++ Seq(histo.cumProb(limit / b))
             val rawRx = Stats.useHistogramUniformFunction(timeRange, limit, b, coeff.a0, coeff.a1, alpha, probs)
             for (i <- Seq(0.1, 0.5, 2.5)) {
-//              val mul = i
-//              Stats.useHistogramUniformFunction(timeRange, limit, b, coeff.a0, coeff.a1, mul, probs)
-//              Stats.getOptimalRx(timeRange, limit, stdDev, mul, coeff.a0, coeff.a1)
+              //              val mul = i
+              //              Stats.useHistogramUniformFunction(timeRange, limit, b, coeff.a0, coeff.a1, mul, probs)
+              //              Stats.getOptimalRx(timeRange, limit, stdDev, mul, coeff.a0, coeff.a1)
             }
             val rx = validateRange(rawRx)
             val histoIsBig = rawRx > rst._1
@@ -380,7 +380,7 @@ object ResponseTime extends App with Connection {
   }
 
   def getCountOnlyAQL(start: DateTime, rangeInHour: Int, keyword: Option[String]): String = {
-//    val name = "twitter.ds_tweet_prefix"
+    //    val name = "twitter.ds_tweet_prefix"
     val name = "twitter.ds_tweet"
     val keywordFilter = keyword.map(k => FilterStatement(TextField("text"), None, Relation.contains, Seq(k)))
     val timeFilter = FilterStatement(TimeField("create_at"), None, Relation.inRange,
@@ -388,11 +388,13 @@ object ResponseTime extends App with Connection {
         TimeField.TimeFormat.print(start.plusHours(rangeInHour))))
     val filters = keywordFilter.map(Seq(timeFilter, _)).getOrElse(Seq(timeFilter))
     val byDay = ByStatement(TimeField("create_at"), Some(Interval(TimeUnit.Day)), Some(NumberField("day")))
+    val byState = ByStatement(NumberField("geo_tag.stateID"), None, Some(NumberField("state")))
+    val groupStatement = GroupStatement(Seq(byDay, byState), Seq(aggrCount))
     //    val groupStatement = GroupStatement(Seq(byDay), Seq(aggrCount))
     //    val groupStatement = GroupStatement(Seq(byDay), Seq(aggrCount))
     //    val query = Query(dataset = "twitter.ds_tweet", filter = filters, globalAggr = Some(globalAggr))
-    val query = Query(dataset = name, filter = filters, globalAggr = Some(globalAggr))
-    //        val query = Query(dataset = "twitter.ds_tweet", filter = filters, groups = Some(groupStatement))
+    //    val query = Query(dataset = name, filter = filters, globalAggr = Some(globalAggr))
+    val query = Query(dataset = "twitter.ds_tweet", filter = filters, groups = Some(groupStatement))
     //    val query = Query(dataset = "twitter.ds_tweet_prefix", filter = filters, groups = Some(groupStatement))
     queryGen.generate(query, Map(name -> TwitterDataStore.TwitterSchema))
   }
