@@ -22,6 +22,7 @@ object Common {
   val reportLog = Logger("report")
   val workerLog = Logger("worker")
   val statsLog = Logger("stats")
+  val debugLog = Logger("debug")
 
   case class QueryStat(targetMS: Int, estSlice: Int, actualMS: Int)
 

@@ -52,6 +52,10 @@
         <appender-ref ref="STATS"/>
     </logger>
 
+    <logger name="debug" level="INFO">
+        <appender-ref ref="STATS"/>
+    </logger>
+
     <logger name="play" level="INFO"/>
     <logger name="application" level="DEBUG"/>
 

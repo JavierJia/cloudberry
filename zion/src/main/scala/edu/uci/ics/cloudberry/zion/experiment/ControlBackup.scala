@@ -464,53 +464,21 @@ object ControlBackup extends App with Connection {
 
     import Scheduler._
 
-    val isLocal = true
-    val isGlobal = true
-    for( i <- 1 to 4) {
-      for (alpha <- Seq(10, 100, 1000, 10000)) {
+    for (i <- 1 to 3) {
+      for (alpha <- Seq(0.1, 0.5, 2.5)) {
         val globalHistory = List.newBuilder[QueryStat]
+        for (isGlobal <- Seq(false, true)) {
 
-        if (isLocal) {
-//          for (algo <- Seq(AlgoType.Baseline, AlgoType.NormalGaussian, AlgoType.Histogram)) {
-            for (algo <- Seq(AlgoType.NormalGaussian, AlgoType.Histogram)) {
-            for (reportInterval <- Seq(2000)) {
-              for (withBackup <- Seq(false)) {
-                for (keyword <- Seq("zika", "election", "rain", "happy", "")) {
-                  val fullHistory = List.newBuilder[QueryStat]
-                  val scheduler = system.actorOf(Props(new Scheduler(fullHistory)))
-                  val reporter = system.actorOf(Props(new Reporter(keyword, reportInterval millis)))
-                  scheduler ! Request(Parameters(reportInterval, algo, alpha, reporter, keyword, 1, withBackup = withBackup), urEndDate, urStartDate, reportInterval)
-                  breakable {
-                    while (true) {
-                      implicit val timeOut: Timeout = Timeout(15 seconds)
-                      (Await.result(scheduler ? CheckState, Duration.Inf)).asInstanceOf[SchedulerState] match {
-                        case Idle =>
-                          scheduler ! PoisonPill
-                          workerLog.info(s"DONE $keyword, reportInterval:$reportInterval, withBackup: $withBackup")
-                          Thread.sleep(5000)
-                          break
-                        case any =>
-                          workerLog.info(s"CheckState is $any")
-                          Thread.sleep(5000)
-                      }
-                    }
-                  }
-                  globalHistory ++= fullHistory.result()
-                  fullHistory.result().foreach(stat => statsLog.info(s"$algo,$keyword,${stat.actualMS},${stat.targetMS},${stat.actualMS - stat.targetMS}"))
-                }
-              }
-            }
-          }
-        }
-
-        if (isGlobal) {
+          //          for (algo <- Seq(AlgoType.Baseline, AlgoType.NormalGaussian, AlgoType.Histogram)) {
           for (algo <- Seq(AlgoType.NormalGaussian, AlgoType.Histogram)) {
-//            for (algo <- Seq(AlgoType.Baseline, AlgoType.NormalGaussian, AlgoType.Histogram)) {
             for (reportInterval <- Seq(2000)) {
               for (withBackup <- Seq(false)) {
                 for (keyword <- Seq("zika", "election", "rain", "happy", "")) {
+                  //                for (keyword <- Seq("", "rain", "zika")) {
                   val fullHistory = List.newBuilder[QueryStat]
-                  fullHistory ++= globalHistory.result()
+                  if (isGlobal) {
+                    fullHistory ++= globalHistory.result()
+                  }
                   val start = fullHistory.result().size
                   val scheduler = system.actorOf(Props(new Scheduler(fullHistory)))
                   val reporter = system.actorOf(Props(new Reporter(keyword, reportInterval millis)))
@@ -530,12 +498,15 @@ object ControlBackup extends App with Connection {
                       }
                     }
                   }
+                  globalHistory ++= fullHistory.result()
                   val history = fullHistory.result()
                   history.slice(start, history.length).foreach(stat => statsLog.info(s"$algo,$keyword,${stat.actualMS},${stat.targetMS},${stat.actualMS - stat.targetMS}"))
+                  fullHistory.result().foreach(stat => statsLog.info(s"$algo,$keyword,${stat.actualMS},${stat.targetMS},${stat.actualMS - stat.targetMS}"))
                 }
               }
             }
           }
+
         }
       }
     }

@@ -109,7 +109,9 @@ object Stats extends App {
       Rw
     } else {
       val z = Erf.erfInv(optimalValueZ)
-      println(s"optimal rx: ${(Math.sqrt(2) * stdDev * z + W - a0) / a1}")
+      val g = Math.sqrt(2) * stdDev * z + W
+      val rx = (g- a0) / a1
+      Common.debugLog.info(s"optimal rx: $rx, g:$g, w:$W, alpha: $alpha")
       Math.min(Rw, Math.max(0, (Math.sqrt(2) * stdDev * z + W - a0) / a1))
     }
   }
@@ -298,6 +300,8 @@ object Stats extends App {
     def exp(x: Double, k: Int, pk: Double, sumy: Double, const: Double) = x / R - alpha / W * (pk / (2 * b * b) * y3(b - y(g(x), k)) - sumy * y(g(x), k) + const)
 
     Common.time {
+      var (preX, preE) = (0.0, Double.NegativeInfinity)
+      var preK = 0
       val seqRxEpx: Seq[(Double, Double)] = 0 until (probs.size - 1) map { k =>
         val pk = probs(k)
         val sumy = probs.slice(k + 1, probs.size).sum
@@ -309,10 +313,11 @@ object Stats extends App {
         val square = 1 / co * (W / (R * a1 * alpha) - sumy)
         if (square >= 0 && square <= b) {
           val y = b - Math.sqrt(square)
-          val g = W - (k - W) * b - y
+          val g = W - (k - 0) * b - y
           val x = (g - a0) / a1
           val ex = exp(x, k, pk, sumy, const)
-          //          println(s"k=$k y==$y || g== $g || x===$x || ex===$ex")
+          Common.debugLog.info(s"histo optimaL rx found: $x exp: $ex, k:$k, y:$y, g:$g, W:$W, sumy:$sumy, alpha:$alpha")
+          return x
           (x, ex)
         } else {
           val gl = W - (k - 0 + 1) * b
@@ -322,26 +327,31 @@ object Stats extends App {
           val exLow = exp(xl, k, pk, sumy, const)
           val exHigh = exp(xh, k, pk, sumy, const)
           if (exLow > exHigh) {
+            if (exLow < preE){
+              Common.debugLog.info(s"histo optimaL rx xlow: $xl exp: $exLow, k:$k, g:$gl, W:$W, sumy:$sumy, alpha:$alpha")
+              return preX
+            } else {
+              preE = exLow
+              preX = xl
+              preK = k
+            }
             (xl, exLow)
           } else {
+            Common.debugLog.info(s"histo optimaL rx xhigh: $xh exp: $exHigh,k:$k, g:$gh, W:$W, sumy:$sumy, alpha:$alpha")
+            if (exHigh < preE) {
+              return preX
+            }
             (xh, exHigh)
+            // begin to drops
+            return xh
           }
         }
       }
-      val max = seqRxEpx.maxBy(p => p._2)._1
-      Math.max(0, max)
+      Common.debugLog.info(s"histo optimaL rx preX: $preX exp: $preE,k:$preK, g:${g(preX)}, W:$W, alpha:$alpha")
+      return preX
+//      val max = seqRxEpx.maxBy(p => p._2)._1
+//      Math.max(0, max)
     }
-
-
-    //    val b2 = b * b
-    //    val seqIntegral: Seq[Double] = 1 to probs.size map (i => 0.5 * b2 + (i - 1) * b2)
-    //        println(seqIntegral)
-    //
-    //    def value(j: Int) = probs.slice(j, probs.size).zip(seqIntegral).map { case (p: Double, v: Double) => p * v }.sum
-    //
-    //            0 to (probs.size - 1) foreach (j => println(s"gain:${(W - j * b - a0) / (a1 * range)}, penalty:alpha * ${value(j)/W} = ${alpha / W * value(j)}"))
-    //
-    //    0 to (probs.size - 1) map (j => (W - j * b - a0) / (a1 * range) - (alpha / b / W) * value(j))
   }
 
   val obs: WeightedObservedPoints = new WeightedObservedPoints()

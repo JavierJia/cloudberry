@@ -287,7 +287,11 @@ object ResponseTime extends App with Connection {
           case AlgoType.NormalGaussian =>
             val rawRange = Stats.getOptimalRx(timeRange, limit, stdDev, alpha, coeff.a0, coeff.a1)
             val range = validateRange(rawRange)
-            println(s"range=$rawRange,limit=$limit, o=$stdDev, a=$alpha, a0=${coeff.a0}, a1=${coeff.a1}")
+//            for (i <- 1 to 10) {
+//              val mul = Math.pow(10, i)
+//              Stats.getOptimalRx(timeRange, limit, stdDev, alpha * mul, coeff.a0, coeff.a1)
+//            }
+            debugLog.info(s"range=$rawRange, limit=$limit, o=$stdDev, a=$alpha, a0=${coeff.a0}, a1=${coeff.a1}")
             (range, range * coeff.a1 + coeff.a0)
           case AlgoType.Histogram =>
             if (globalHistory.size < 10) {
@@ -309,12 +313,14 @@ object ResponseTime extends App with Connection {
 
             val probs: Seq[Double] = (0 until (limit / b)).map(histo.prob) ++ Seq(histo.cumProb(limit / b))
             val rawRx = Stats.useHistogramUniformFunction(timeRange, limit, b, coeff.a0, coeff.a1, alpha, probs)
+            for (i <- Seq(0.1, 0.5, 2.5)) {
+//              val mul = i
+//              Stats.useHistogramUniformFunction(timeRange, limit, b, coeff.a0, coeff.a1, mul, probs)
+//              Stats.getOptimalRx(timeRange, limit, stdDev, mul, coeff.a0, coeff.a1)
+            }
             val rx = validateRange(rawRx)
-            //            val maxId = exp.zipWithIndex.maxBy(_._1)._2
-            //            val target = Math.max(0, limit - (maxId + 1) * b / 2)
-            //            val range = validateRange((target - coeff.a0) / coeff.a1)
             val histoIsBig = rawRx > rst._1
-            println(s"normal: ${rst._1}, g:${rst._2}; histo: ${rawRx}, g:${rawRx * coeff.a1 + coeff.a0} histoIsBig:$histoIsBig")
+            debugLog.info(s"normal: ${rst._1}, g:${rst._2}; histo: ${rawRx}, g:${rawRx * coeff.a1 + coeff.a0} histoIsBig:$histoIsBig")
             (rx, rx * coeff.a1 + coeff.a0)
           case AlgoType.Baseline =>
             val range = Math.max(1, (limit - coeff.a0) / coeff.a1)
