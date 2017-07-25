@@ -11,6 +11,7 @@ import play.api.libs.json._
 import scala.collection.mutable
 import scala.concurrent.{Await, Future}
 import scala.concurrent.duration._
+import scala.io.Source
 import scala.util.parsing.json.JSONObject
 
 object ControlBackup extends App with Connection {
@@ -464,14 +465,17 @@ object ControlBackup extends App with Connection {
 
     import Scheduler._
 
-    for (i <- 1 to 1) {
-//      for (alpha <- Seq(0.1, 0.5, 2.5)) {
-      for (alpha <- Seq(0.1)) {
-        val globalHistory = List.newBuilder[QueryStat]
-        for (isGlobal <- Seq(false)) {
+    val globalHistory = List.newBuilder[QueryStat]
+    val stream = this.getClass().getResourceAsStream("/history.log")
+    Source.fromInputStream(stream).getLines().map { line =>
+      globalHistory += QueryStat(0, 0, line.toInt)
+    }
+    for (i <- 1 to 3) {
+      for (alpha <- Seq(0.1, 0.5, 2.5)) {
+        for (isGlobal <- Seq(false, true)) {
 
           //          for (algo <- Seq(AlgoType.Baseline, AlgoType.NormalGaussian, AlgoType.Histogram)) {
-          for (algo <- Seq(AlgoType.Baseline, AlgoType.Histogram)) {
+          for (algo <- Seq(AlgoType.Histogram, AlgoType.NormalGaussian)) {
             for (reportInterval <- Seq(2000)) {
               for (withBackup <- Seq(false)) {
                 for (keyword <- Seq("zika", "election", "rain", "happy", "")) {
@@ -499,7 +503,6 @@ object ControlBackup extends App with Connection {
                       }
                     }
                   }
-                  globalHistory ++= fullHistory.result()
                   val history = fullHistory.result()
                   history.slice(start, history.length).foreach(stat => statsLog.info(s"$algo,$keyword,${stat.actualMS},${stat.targetMS},${stat.actualMS - stat.targetMS}"))
                   fullHistory.result().foreach(stat => statsLog.info(s"$algo,$keyword,${stat.actualMS},${stat.targetMS},${stat.actualMS - stat.targetMS}"))
