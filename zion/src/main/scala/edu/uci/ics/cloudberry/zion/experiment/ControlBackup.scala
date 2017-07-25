@@ -464,15 +464,16 @@ object ControlBackup extends App with Connection {
 
     import Scheduler._
 
-    for (i <- 1 to 3) {
-      for (alpha <- Seq(0.1, 0.5, 2.5)) {
+    for (i <- 1 to 1) {
+//      for (alpha <- Seq(0.1, 0.5, 2.5)) {
+      for (alpha <- Seq(0.1)) {
         val globalHistory = List.newBuilder[QueryStat]
         for (isGlobal <- Seq(false)) {
 
           //          for (algo <- Seq(AlgoType.Baseline, AlgoType.NormalGaussian, AlgoType.Histogram)) {
-          for (algo <- Seq(AlgoType.Histogram)) {
+          for (algo <- Seq(AlgoType.Baseline, AlgoType.Histogram)) {
             for (reportInterval <- Seq(2000)) {
-              for (withBackup <- Seq(false, true)) {
+              for (withBackup <- Seq(false)) {
                 for (keyword <- Seq("zika", "election", "rain", "happy", "")) {
                   //                for (keyword <- Seq("", "rain", "zika")) {
                   val fullHistory = List.newBuilder[QueryStat]
