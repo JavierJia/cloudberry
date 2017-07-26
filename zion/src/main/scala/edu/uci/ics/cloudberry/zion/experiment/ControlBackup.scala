@@ -491,7 +491,7 @@ object ControlBackup extends App with Connection {
 
     for (i <- 1 to 2) {
 //      for (alpha <- Seq(0.1, 0.5, 2.5)) {
-        for (alpha <- Seq(2.5)) {
+        for (alpha <- Seq(0.1, 2.5)) {
         for (isGlobal <- Seq(false)) {
 
           //          for (algo <- Seq(AlgoType.Baseline, AlgoType.NormalGaussian, AlgoType.Histogram)) {
