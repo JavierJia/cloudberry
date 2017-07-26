@@ -11,6 +11,7 @@ import play.api.libs.json._
 import scala.collection.mutable
 import scala.concurrent.{Await, Future}
 import scala.concurrent.duration._
+import scala.io.Source
 import scala.util.parsing.json.JSONObject
 
 object ControlBackup extends App with Connection {
@@ -464,13 +465,19 @@ object ControlBackup extends App with Connection {
 
     import Scheduler._
 
+    val globalHistory = List.newBuilder[QueryStat]
+    val stream = this.getClass().getResourceAsStream("/count.history.log")
+    Source.fromInputStream(stream).getLines().map { line =>
+      globalHistory += QueryStat(0, 0, line.toInt)
+    }
+
     for (i <- 1 to 3) {
       for (alpha <- Seq(0.1, 0.5, 2.5)) {
         val globalHistory = List.newBuilder[QueryStat]
         for (isGlobal <- Seq(false, true)) {
 
           //          for (algo <- Seq(AlgoType.Baseline, AlgoType.NormalGaussian, AlgoType.Histogram)) {
-          for (algo <- Seq(AlgoType.NormalGaussian, AlgoType.Histogram)) {
+          for (algo <- Seq(AlgoType.Histogram, AlgoType.NormalGaussian)) {
             for (reportInterval <- Seq(2000)) {
               for (withBackup <- Seq(false)) {
                 for (keyword <- Seq("zika", "election", "rain", "happy", "")) {
