@@ -81,8 +81,19 @@ object ControlBackup extends App with Connection {
 
           sumRisk += 1
           workerLog.info(s"@Risk fire risk query, report limit: $reportLimit")
-          val waitingTimeOut = decideWaitTime(backupStats, reportLimit, parameters.withBackup)
-          val RangeAndEstTime(rRisk, estMills) = decideRRiskAndESTTime(endTime, till, waitingTimeOut, riskStats, parameters)
+
+          // use full report limit first
+          var waitingTimeOut = reportLimit
+          val RangeAndEstTime(rRisk, estMills) = {
+            val RangeAndEstTime(rRiskFull, estMillsFull) = decideRRiskAndESTTime(endTime, till, reportLimit, riskStats, parameters)
+            if (rRiskFull > 5 * parameters.minHours) {
+              waitingTimeOut = decideWaitTime(backupStats, reportLimit, parameters.withBackup)
+              decideRRiskAndESTTime(endTime, till, waitingTimeOut, riskStats, parameters)
+            } else {
+              workerLog.info(s"@Risk not a risky case: $reportLimit, rRiskFull:$rRiskFull")
+              RangeAndEstTime(rRiskFull, estMillsFull)
+            }
+          }
 
           val start = endTime.minusHours(rRisk)
           val sql = ResponseTime.getCountOnlyAQL(start, rRisk, toOpt(parameters.keyword))
@@ -491,15 +502,15 @@ object ControlBackup extends App with Connection {
 
     for (i <- 1 to 2) {
 //      for (alpha <- Seq(0.1, 0.5, 2.5)) {
-        for (alpha <- Seq(0.1, 2.5)) {
+        for (alpha <- Seq(2.5)) {
         for (isGlobal <- Seq(false)) {
 
           //          for (algo <- Seq(AlgoType.Baseline, AlgoType.NormalGaussian, AlgoType.Histogram)) {
           for (algo <- Seq(AlgoType.NormalGaussian)) {
             for (reportInterval <- Seq(2000)) {
-              for (withBackup <- Seq(false, true)) {
+              for (withBackup <- Seq(true)) {
 //                for (keyword <- Seq("zika", "election", "rain", "happy", "")) {
-                  for (keyword <- Seq("zika", "happy")) {
+                  for (keyword <- Seq( "happy")) {
                   val fullHistory = List.newBuilder[QueryStat]
                   if (isGlobal) {
                     fullHistory ++= globalHistory.result()
