@@ -135,16 +135,19 @@ object ControlBackup extends App with Connection {
     when(Panic) {
       case Event(FireBackup, StateDataWithTimeOut(Request(parameters, endTime, till, reportLimit), waitTimeOut, false, riskStats, backupStats)) =>
         if (parameters.withBackup) {
-          sumBackup += 1
-          workerLog.info(s"@Panic, fire backup query")
           val panicLimit = reportLimit - waitTimeOut - 50
-          val RangeAndEstTime(rBackup, estMills) = decideRBackAndESTTime(endTime, till, panicLimit, backupStats, parameters)
+          if (panicLimit > 0) {
+            sumBackup += 1
+            workerLog.info(s"@Panic, fire backup query")
+            val RangeAndEstTime(rBackup, estMills) = decideRBackAndESTTime(endTime, till, panicLimit, backupStats, parameters)
 
-          val start = endTime.minusHours(rBackup)
-          val sql = ResponseTime.getCountOnlyAQL(start, rBackup, toOpt(parameters.keyword))
-          runAQuery(sql, DBResultType.BACKUP, start, endTime, rBackup, estMills) pipeTo self
-
-          setTimer(PanicTimerName, PanicTimeOut, panicLimit millis)
+            val start = endTime.minusHours(rBackup)
+            val sql = ResponseTime.getCountOnlyAQL(start, rBackup, toOpt(parameters.keyword))
+            runAQuery(sql, DBResultType.BACKUP, start, endTime, rBackup, estMills) pipeTo self
+            setTimer(PanicTimerName, PanicTimeOut, panicLimit millis)
+          } else {
+            self ! PanicTimeOut
+          }
           stay
         } else {
           stay
@@ -175,6 +178,7 @@ object ControlBackup extends App with Connection {
 
       case Event(r@LabeledDBResult(DBResultType.BACKUP, interval, range, estMills, result), s@StateDataWithTimeOut(request, waitTimeOut, isPanicTimeOut, riskStats, backupStats)) =>
         workerLog.info(s"@Panic, receive backup result $r")
+        learnQueryState(interval.getStart, range, Some(estMills), result.mills, backupStats)
         if (interval.getEndMillis <= request.endTime.getMillis) {
           if (isPanicTimeOut) {
 
@@ -221,7 +225,6 @@ object ControlBackup extends App with Connection {
       }
 
       reporter ! Reporter.OneShot(accResult.from, accResult.getRange, accResult.count, accResult.json)
-      learnQueryState(start, range, Some(dbResult.estMills), dbResult.result.mills, backupStats)
 
 
       val waitingTimeOut = decideWaitTime(backupStats, nextLimit, true)
@@ -247,8 +250,9 @@ object ControlBackup extends App with Connection {
       case Event(CheckState, _) =>
         sender() ! stateName
         stay
-      case Event(r@LabeledDBResult(DBResultType.BACKUP, _, _, _, _), _) =>
+      case Event(r@LabeledDBResult(DBResultType.BACKUP, interval, range, estMills, result), s: StateWithBackup) =>
         workerLog.error(s"$stateName received backup result $r")
+        learnQueryState(interval.getStart, range, Some(estMills), result.mills, s.backupStats)
         stay
       case Event(Rewind, _) =>
         cancelTimer(WaitTimerName)
@@ -390,11 +394,17 @@ object ControlBackup extends App with Connection {
 
     case object Uninitialized extends SchedulerData
 
-    case class StateData(request: Request, riskStats: HistoryStats, backupStats: HistoryStats) extends SchedulerData
+    trait StateWithBackup{
+      val backupStats: HistoryStats
+    }
 
-    case class StateDataWithTimeOut(request: Request, waitTimeOut: Int, panicTimeOut: Boolean, riskStats: HistoryStats, backupStats: HistoryStats) extends SchedulerData
+    case class StateData(request: Request, riskStats: HistoryStats, backupStats: HistoryStats) extends SchedulerData with StateWithBackup
 
-    case class StateDataWithBackupResult(stateDataWithTimeOut: StateDataWithTimeOut, backupResult: LabeledDBResult) extends SchedulerData
+    case class StateDataWithTimeOut(request: Request, waitTimeOut: Int, panicTimeOut: Boolean, riskStats: HistoryStats, backupStats: HistoryStats) extends SchedulerData with StateWithBackup
+
+    case class StateDataWithBackupResult(stateDataWithTimeOut: StateDataWithTimeOut, backupResult: LabeledDBResult) extends SchedulerData with StateWithBackup {
+      override val backupStats: HistoryStats = stateDataWithTimeOut.backupStats
+    }
 
     def toOpt(keyword: String): Option[String] = if (keyword.length > 0) Some(keyword) else None
 
@@ -422,15 +432,23 @@ object ControlBackup extends App with Connection {
         return reportLimit
       }
       val result = backupStats.history.result()
-      if (result.size > 3) {
-        val stats = result.sortBy(_.actualMS).take(result.size - 2) // remove some extreme case
+      if (result.size > 0) {
+//        val stats = result.sortBy(_.actualMS).take(result.size - 2) // remove some extreme case
+        val stats = result
         val avg = stats.map(_.actualMS).sum / stats.size
         val variance = stats.map(s => (avg - s.actualMS) * (avg - s.actualMS)).sum / stats.size
         val o = Math.sqrt(variance)
-        val v = Math.max(reportLimit / 2, reportLimit - (avg + o)).toInt
-        workerLog.info(s"waiting time out is: $v")
-        v
+        if (avg > reportLimit / 2) {
+          //You are too slow, Don't try backup!
+          workerLog.info(s"backup query is too expensive, give up backup!")
+          reportLimit
+        } else {
+          val v = Math.max(reportLimit / 2, reportLimit - (avg + o)).toInt
+          workerLog.info(s"waiting time out is: $v")
+          v
+        }
       } else {
+        workerLog.info(s"waiting time out is just half ")
         reportLimit / 2
       }
     }
@@ -471,17 +489,17 @@ object ControlBackup extends App with Connection {
       globalHistory += QueryStat(0, 0, line.toInt)
     }
 
-    for (i <- 1 to 3) {
-      for (alpha <- Seq(0.1, 0.5, 2.5)) {
-        val globalHistory = List.newBuilder[QueryStat]
-        for (isGlobal <- Seq(false, true)) {
+    for (i <- 1 to 2) {
+//      for (alpha <- Seq(0.1, 0.5, 2.5)) {
+        for (alpha <- Seq(2.5)) {
+        for (isGlobal <- Seq(false)) {
 
           //          for (algo <- Seq(AlgoType.Baseline, AlgoType.NormalGaussian, AlgoType.Histogram)) {
-          for (algo <- Seq(AlgoType.Histogram, AlgoType.NormalGaussian)) {
+          for (algo <- Seq(AlgoType.NormalGaussian)) {
             for (reportInterval <- Seq(2000)) {
-              for (withBackup <- Seq(false)) {
-                for (keyword <- Seq("zika", "election", "rain", "happy", "")) {
-                  //                for (keyword <- Seq("", "rain", "zika")) {
+              for (withBackup <- Seq(false, true)) {
+//                for (keyword <- Seq("zika", "election", "rain", "happy", "")) {
+                  for (keyword <- Seq("zika", "happy")) {
                   val fullHistory = List.newBuilder[QueryStat]
                   if (isGlobal) {
                     fullHistory ++= globalHistory.result()
@@ -505,7 +523,6 @@ object ControlBackup extends App with Connection {
                       }
                     }
                   }
-                  globalHistory ++= fullHistory.result()
                   val history = fullHistory.result()
                   history.slice(start, history.length).foreach(stat => statsLog.info(s"$algo,$keyword,${stat.actualMS},${stat.targetMS},${stat.actualMS - stat.targetMS}"))
                   fullHistory.result().foreach(stat => statsLog.info(s"$algo,$keyword,${stat.actualMS},${stat.targetMS},${stat.actualMS - stat.targetMS}"))
