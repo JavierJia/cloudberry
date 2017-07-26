@@ -467,12 +467,12 @@ object ControlBackup extends App with Connection {
     for (i <- 1 to 3) {
       for (alpha <- Seq(0.1, 0.5, 2.5)) {
         val globalHistory = List.newBuilder[QueryStat]
-        for (isGlobal <- Seq(false)) {
+        for (isGlobal <- Seq(false, true)) {
 
           //          for (algo <- Seq(AlgoType.Baseline, AlgoType.NormalGaussian, AlgoType.Histogram)) {
-          for (algo <- Seq(AlgoType.NormalGaussian)) {
+          for (algo <- Seq(AlgoType.NormalGaussian, AlgoType.Histogram)) {
             for (reportInterval <- Seq(2000)) {
-              for (withBackup <- Seq(false, true)) {
+              for (withBackup <- Seq(false)) {
                 for (keyword <- Seq("zika", "election", "rain", "happy", "")) {
                   //                for (keyword <- Seq("", "rain", "zika")) {
                   val fullHistory = List.newBuilder[QueryStat]
