@@ -496,21 +496,21 @@ object ControlBackup extends App with Connection {
 
     val globalHistory = List.newBuilder[QueryStat]
     val stream = this.getClass().getResourceAsStream("/count.history.log")
-    Source.fromInputStream(stream).getLines().map { line =>
+    Source.fromInputStream(stream).getLines().foreach { line =>
       globalHistory += QueryStat(0, 0, line.toInt)
     }
 
-    for (i <- 1 to 2) {
-//      for (alpha <- Seq(0.1, 0.5, 2.5)) {
-        for (alpha <- Seq(2.5)) {
-        for (isGlobal <- Seq(false)) {
+    for (i <- 1 to 3) {
+      for (alpha <- Seq(0.1, 0.5, 2.5)) {
+//        for (alpha <- Seq(2.5)) {
+        for (isGlobal <- Seq(false, true)) {
 
           //          for (algo <- Seq(AlgoType.Baseline, AlgoType.NormalGaussian, AlgoType.Histogram)) {
-          for (algo <- Seq(AlgoType.NormalGaussian)) {
+          for (algo <- Seq(AlgoType.NormalGaussian, AlgoType.Histogram)) {
             for (reportInterval <- Seq(2000)) {
-              for (withBackup <- Seq(true)) {
-//                for (keyword <- Seq("zika", "election", "rain", "happy", "")) {
-                  for (keyword <- Seq( "happy")) {
+              for (withBackup <- Seq(false)) {
+                for (keyword <- Seq("zika", "election", "rain", "happy", "")) {
+//                  for (keyword <- Seq( "happy")) {
                   val fullHistory = List.newBuilder[QueryStat]
                   if (isGlobal) {
                     fullHistory ++= globalHistory.result()
