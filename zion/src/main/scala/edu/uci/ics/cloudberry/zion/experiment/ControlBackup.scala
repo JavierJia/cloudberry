@@ -12,6 +12,7 @@ import scala.collection.mutable
 import scala.concurrent.{Await, Future}
 import scala.concurrent.duration._
 import scala.io.Source
+import scala.util.Random
 import scala.util.parsing.json.JSONObject
 
 object ControlBackup extends App with Connection {
@@ -29,6 +30,9 @@ object ControlBackup extends App with Connection {
   def runAQuery(query: String, label: DBResultType.Type, from: DateTime, to: DateTime, range: Int, estMills: Int): Future[LabeledDBResult] = {
     val start = DateTime.now
     adbConn.postQuery(query).map { ret =>
+      if(Random.nextBoolean()){
+        Thread.sleep(1000)
+      }
       val duration = DateTime.now.getMillis - start.getMillis
       val sum = (ret \\ "count").map(_.as[Int]).sum
       LabeledDBResult(label, new TInterval(from, to), range, estMills, ResultFromDB(duration, sum, ret))
@@ -495,22 +499,22 @@ object ControlBackup extends App with Connection {
     import Scheduler._
 
     val globalHistory = List.newBuilder[QueryStat]
-    val stream = this.getClass().getResourceAsStream("/count.history.log")
-    Source.fromInputStream(stream).getLines().map { line =>
+    val stream = this.getClass().getResourceAsStream("/star.log")
+    Source.fromInputStream(stream).getLines().foreach { line =>
       globalHistory += QueryStat(0, 0, line.toInt)
     }
 
-    for (i <- 1 to 2) {
+    for (i <- 1 to 1) {
 //      for (alpha <- Seq(0.1, 0.5, 2.5)) {
-        for (alpha <- Seq(2.5)) {
-        for (isGlobal <- Seq(false)) {
+        for (alpha <- Seq(50)) {
+        for (isGlobal <- Seq(true)) {
 
           //          for (algo <- Seq(AlgoType.Baseline, AlgoType.NormalGaussian, AlgoType.Histogram)) {
-          for (algo <- Seq(AlgoType.NormalGaussian)) {
+          for (algo <- Seq(AlgoType.NormalGaussian, AlgoType.Histogram)) {
             for (reportInterval <- Seq(2000)) {
-              for (withBackup <- Seq(true)) {
+              for (withBackup <- Seq(false)) {
 //                for (keyword <- Seq("zika", "election", "rain", "happy", "")) {
-                  for (keyword <- Seq( "happy")) {
+                  for (keyword <- Seq("")) {
                   val fullHistory = List.newBuilder[QueryStat]
                   if (isGlobal) {
                     fullHistory ++= globalHistory.result()

@@ -6,6 +6,7 @@ import java.util.concurrent.Executors
 import akka.actor.ActorSystem
 import akka.stream.ActorMaterializer
 import com.typesafe.config.ConfigFactory
+import edu.uci.ics.cloudberry.zion.experiment.Stats.Coeff
 import edu.uci.ics.cloudberry.zion.model.impl.{AsterixSQLPPConn, SQLPPGenerator}
 import edu.uci.ics.cloudberry.zion.model.schema._
 import org.apache.commons.math3.fitting.WeightedObservedPoints
@@ -282,7 +283,9 @@ object ResponseTime extends App with Connection {
         (closeRange, limit)
       } else {
         val stdDev = Math.sqrt(variance)
-        val coeff = trainLinearModel(localHistory)
+//        val coeff = trainLinearModel(localHistory)
+        //FIXME this is the coefficient for the count *
+        val coeff = Coeff(271, 89)
         algoType match {
           case AlgoType.NormalGaussian =>
             val rawRange = Stats.getOptimalRx(timeRange, limit, stdDev, alpha, coeff.a0, coeff.a1)
