@@ -323,7 +323,8 @@ object ResponseTime extends App with Connection {
             debugLog.info(s"normal: ${rst._1}, g:${rst._2}; histo: ${rawRx}, g:${rawRx * coeff.a1 + coeff.a0} histoIsBig:$histoIsBig")
             (rx, rx * coeff.a1 + coeff.a0)
           case AlgoType.Baseline =>
-            val range = Math.max(1, (limit - coeff.a0) / coeff.a1)
+            val rawRange = Math.max(1, (limit - coeff.a0) / coeff.a1)
+            val range = validateRange(rawRange)
             (range, limit)
         }
       }
