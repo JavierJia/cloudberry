@@ -501,7 +501,7 @@ object ControlBackup extends App with Connection {
     }
 
     for (i <- 1 to 3) {
-      for (alpha <- Seq(1, 5, 25)) {
+      for (alpha <- Seq(50, 100)) {
 //        for (alpha <- Seq(2.5)) {
         for (isGlobal <- Seq(false)) {
 
