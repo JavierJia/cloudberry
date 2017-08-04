@@ -500,13 +500,13 @@ object ControlBackup extends App with Connection {
       globalHistory += QueryStat(0, 0, line.toInt)
     }
 
-    for (i <- 1 to 1) {
-      for (alpha <- Seq(600, 6000,60000)) {
+    for (i <- 1 to 3) {
+      for (alpha <- Seq(10, 20, 30)) {
 //        for (alpha <- Seq(2.5)) {
         for (isGlobal <- Seq(false)) {
 
 //                    for (algo <- Seq(AlgoType.Baseline, AlgoType.NormalGaussian, AlgoType.Histogram)) {
-          for (algo <- Seq(AlgoType.NormalGaussian)) {
+          for (algo <- Seq(AlgoType.NormalGaussian, AlgoType.Histogram)) {
             for (reportInterval <- Seq(2000)) {
               for (withBackup <- Seq(false)) {
                 for (keyword <- Seq("zika", "election", "rain", "happy", "")) {
