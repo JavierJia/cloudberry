@@ -258,7 +258,7 @@ object ResponseTime extends App with Connection {
   }
 
 
-  def estimateInGeneral(limit: Int, alpha: Double, localHistory: List[QueryStat], globalHistory: List[QueryStat], algoType: AlgoType.Type): (Double, Double) = {
+  def estimateInGeneral(limit: Int, rawAlpha: Double, localHistory: List[QueryStat], globalHistory: List[QueryStat], algoType: AlgoType.Type): (Double, Double) = {
     val lastRange = localHistory.last.estSlice
     val lastTime = localHistory.last.actualMS
     val nextRange = lastRange * limit / lastTime
@@ -283,6 +283,9 @@ object ResponseTime extends App with Connection {
       } else {
         val stdDev = Math.sqrt(variance)
         val coeff = trainLinearModel(localHistory)
+        val cFactor = Math.max(1, localHistory.length * timeRange / localHistory.map(_.estSlice).sum )
+        val alpha = rawAlpha / cFactor
+        debugLog.info(s"rawAlpha:$rawAlpha, cFactor:$cFactor, alpha:$alpha")
         algoType match {
           case AlgoType.NormalGaussian =>
             val rawRange = Stats.getOptimalRx(timeRange, limit, stdDev, alpha, coeff.a0, coeff.a1)
