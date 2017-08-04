@@ -329,6 +329,9 @@ object ResponseTime extends App with Connection {
             val rawRange = Math.max(1, (limit - coeff.a0) / coeff.a1)
             val range = validateRange(rawRange)
             (range, limit)
+          case AlgoType.EqualResultWidth =>
+            val range = timeRange / 60
+            (range, limit)
         }
       }
     }

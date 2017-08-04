@@ -501,12 +501,12 @@ object ControlBackup extends App with Connection {
     }
 
     for (i <- 1 to 3) {
-      for (alpha <- Seq(10, 20, 30)) {
+      for (alpha <- Seq(1)) {
 //        for (alpha <- Seq(2.5)) {
         for (isGlobal <- Seq(false)) {
 
 //                    for (algo <- Seq(AlgoType.Baseline, AlgoType.NormalGaussian, AlgoType.Histogram)) {
-          for (algo <- Seq(AlgoType.NormalGaussian, AlgoType.Histogram)) {
+          for (algo <- Seq(AlgoType.EqualResultWidth)) {
             for (reportInterval <- Seq(2000)) {
               for (withBackup <- Seq(false)) {
                 for (keyword <- Seq("zika", "election", "rain", "happy", "")) {
