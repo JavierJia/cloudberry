@@ -283,17 +283,17 @@ object ResponseTime extends App with Connection {
       } else {
         val stdDev = Math.sqrt(variance)
         val coeff = trainLinearModel(localHistory)
-        val cFactor = Math.max(1, localHistory.length * timeRange / localHistory.map(_.estSlice).sum )
+        val cFactor = Math.max(1, localHistory.length * timeRange / localHistory.map(_.estSlice).sum)
         val alpha = rawAlpha / cFactor
         debugLog.info(s"rawAlpha:$rawAlpha, cFactor:$cFactor, alpha:$alpha")
         algoType match {
           case AlgoType.NormalGaussian =>
             val rawRange = Stats.getOptimalRx(timeRange, limit, stdDev, alpha, coeff.a0, coeff.a1)
             val range = validateRange(rawRange)
-//            for (i <- 1 to 10) {
-//              val mul = Math.pow(10, i)
-//              Stats.getOptimalRx(timeRange, limit, stdDev, alpha * mul, coeff.a0, coeff.a1)
-//            }
+            //            for (i <- 1 to 10) {
+            //              val mul = Math.pow(10, i)
+            //              Stats.getOptimalRx(timeRange, limit, stdDev, alpha * mul, coeff.a0, coeff.a1)
+            //            }
             debugLog.info(s"range=$rawRange, limit=$limit, o=$stdDev, a=$alpha, a0=${coeff.a0}, a1=${coeff.a1}")
             (range, range * coeff.a1 + coeff.a0)
           case AlgoType.Histogram =>
@@ -317,9 +317,9 @@ object ResponseTime extends App with Connection {
             val probs: Seq[Double] = (0 until (limit / b)).map(histo.prob) ++ Seq(histo.cumProb(limit / b))
             val rawRx = Stats.useHistogramUniformFunction(timeRange, limit, b, coeff.a0, coeff.a1, alpha, probs)
             for (i <- Seq(0.1, 0.5, 2.5)) {
-//              val mul = i
-//              Stats.useHistogramUniformFunction(timeRange, limit, b, coeff.a0, coeff.a1, mul, probs)
-//              Stats.getOptimalRx(timeRange, limit, stdDev, mul, coeff.a0, coeff.a1)
+              //              val mul = i
+              //              Stats.useHistogramUniformFunction(timeRange, limit, b, coeff.a0, coeff.a1, mul, probs)
+              //              Stats.getOptimalRx(timeRange, limit, stdDev, mul, coeff.a0, coeff.a1)
             }
             val rx = validateRange(rawRx)
             val histoIsBig = rawRx > rst._1
@@ -387,7 +387,7 @@ object ResponseTime extends App with Connection {
   }
 
   def getCountOnlyAQL(start: DateTime, rangeInHour: Int, keyword: Option[String]): String = {
-//    val name = "twitter.ds_tweet_prefix"
+    //    val name = "twitter.ds_tweet_prefix"
     val name = "twitter.ds_tweet"
     val keywordFilter = keyword.map(k => FilterStatement(TextField("text"), None, Relation.contains, Seq(k)))
     val timeFilter = FilterStatement(TimeField("create_at"), None, Relation.inRange,

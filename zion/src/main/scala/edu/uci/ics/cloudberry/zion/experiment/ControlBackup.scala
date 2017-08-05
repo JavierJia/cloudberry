@@ -86,15 +86,20 @@ object ControlBackup extends App with Connection {
           var waitingTimeOut = reportLimit
           val RangeAndEstTime(rRisk, estMills) = {
             val RangeAndEstTime(rRiskFull, estMillsFull) = decideRRiskAndESTTime(endTime, till, reportLimit, riskStats, parameters)
-            if (rRiskFull > 5 * parameters.minHours) {
-              waitingTimeOut = decideWaitTime(backupStats, reportLimit, parameters.withBackup)
-              decideRRiskAndESTTime(endTime, till, waitingTimeOut, riskStats, parameters)
+            if (parameters.withBackup) {
+              if (rRiskFull > 5 * parameters.minHours) {
+                waitingTimeOut = decideWaitTime(backupStats, reportLimit, parameters.withBackup)
+                decideRRiskAndESTTime(endTime, till, waitingTimeOut, riskStats, parameters)
+              } else {
+                workerLog.info(s"@Risk not a risky case: $reportLimit, rRiskFull:$rRiskFull")
+                RangeAndEstTime(rRiskFull, estMillsFull)
+              }
             } else {
-              workerLog.info(s"@Risk not a risky case: $reportLimit, rRiskFull:$rRiskFull")
               RangeAndEstTime(rRiskFull, estMillsFull)
             }
           }
 
+          debugLog.error(s"rRiskFull:$rRisk")
           val start = endTime.minusHours(rRisk)
           val sql = ResponseTime.getCountOnlyAQL(start, rRisk, toOpt(parameters.keyword))
           runAQuery(sql, DBResultType.RISK, start, endTime, rRisk, estMills) pipeTo self
@@ -427,7 +432,7 @@ object ControlBackup extends App with Connection {
         RangeAndEstTime(1900, 60000)
       } else {
         if (parameters.algo == AlgoType.EqualResultWidth) {
-          return RangeAndEstTime(parameters.width, 10 * 60 * 1000)
+          return RangeAndEstTime(parameters.width, limit)
         }
         if (historyStats.history.result().isEmpty) {
           RangeAndEstTime(parameters.minHours, Int.MaxValue)
@@ -518,7 +523,7 @@ object ControlBackup extends App with Connection {
                   val start = fullHistory.result().size
                   val scheduler = system.actorOf(Props(new Scheduler(fullHistory)))
                   val reporter = system.actorOf(Props(new Reporter(keyword, reportInterval millis)))
-                  scheduler ! Request(Parameters(reportInterval, algo, alpha, reporter, keyword, 1, withBackup = withBackup), urEndDate, urStartDate, reportInterval)
+                  scheduler ! Request(Parameters(reportInterval, algo, alpha, reporter, keyword, 1, width = (timeRange / 60).toInt, withBackup = withBackup), urEndDate, urStartDate, reportInterval)
                   breakable {
                     while (true) {
                       implicit val timeOut: Timeout = Timeout(15 seconds)
