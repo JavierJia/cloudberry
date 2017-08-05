@@ -26,7 +26,7 @@ trait Connection {
   //{ "$1": "2017-01-21T07:47:36.000Z", "$2": 119945355 }
   //  val numberLSMs = 965
   val numberLSMs = 267
-  val timeRange: Double = 1572.0
+  val timeRange: Double = 1768
   //  val unit = new Duration(urStartDate, urEndDate).dividedBy(numberLSMs).getStandardHours
   val unit = 1
 

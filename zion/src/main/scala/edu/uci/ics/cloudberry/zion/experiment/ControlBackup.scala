@@ -505,6 +505,7 @@ object ControlBackup extends App with Connection {
       globalHistory += QueryStat(0, 0, line.toInt)
     }
 
+    val width = 60
     for (i <- 1 to 3) {
       for (alpha <- Seq(1)) {
 //        for (alpha <- Seq(2.5)) {
@@ -523,7 +524,7 @@ object ControlBackup extends App with Connection {
                   val start = fullHistory.result().size
                   val scheduler = system.actorOf(Props(new Scheduler(fullHistory)))
                   val reporter = system.actorOf(Props(new Reporter(keyword, reportInterval millis)))
-                  scheduler ! Request(Parameters(reportInterval, algo, alpha, reporter, keyword, 1, width = (timeRange / 60).toInt, withBackup = withBackup), urEndDate, urStartDate, reportInterval)
+                  scheduler ! Request(Parameters(reportInterval, algo, alpha, reporter, keyword, 1, width = (timeRange / width).toInt, withBackup = withBackup), urEndDate, urStartDate, reportInterval)
                   breakable {
                     while (true) {
                       implicit val timeOut: Timeout = Timeout(15 seconds)
