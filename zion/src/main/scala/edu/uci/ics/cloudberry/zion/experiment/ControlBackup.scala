@@ -507,7 +507,7 @@ object ControlBackup extends App with Connection {
 
     val width = 60
     for (i <- 1 to 5) {
-      for (alpha <- Seq(5, 15, 25, 50, 125)) {
+      for (alpha <- Seq(1, 5, 25, 50, 100, 125)) {
 //        for (alpha <- Seq(2.5)) {
         for (isGlobal <- Seq(false)) {
 

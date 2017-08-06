@@ -283,9 +283,13 @@ object ResponseTime extends App with Connection {
       } else {
         val stdDev = Math.sqrt(variance)
         val coeff = trainLinearModel(localHistory)
-        val cFactor = Math.max(1, localHistory.length * timeRange / localHistory.map(_.estSlice).sum)
-        val alpha = rawAlpha / cFactor
-        debugLog.info(s"rawAlpha:$rawAlpha, cFactor:$cFactor, alpha:$alpha")
+        val cFactorOld = Math.max(1, localHistory.length * timeRange / localHistory.map(_.estSlice).sum)
+
+        val passedRunTime = localHistory.map(_.actualMS).sum
+        val passedRange = localHistory.map(_.estSlice).sum
+        val estTotalTime = timeRange * passedRunTime / passedRange
+        val alpha = rawAlpha * limit / estTotalTime
+        debugLog.info(s"rawAlpha:$rawAlpha, estTime:$estTotalTime, alpha:$alpha")
         algoType match {
           case AlgoType.NormalGaussian =>
             val rawRange = Stats.getOptimalRx(timeRange, limit, stdDev, alpha, coeff.a0, coeff.a1)
